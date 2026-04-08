@@ -11,7 +11,7 @@ def vectorized_label(j):
 def fixed_point_int(v, frac_bits=11):
     return int(round(v * (1 << frac_bits)))
 
-def save_biases_and_weights(net, bias_file="bias.txt", weight_file="weights.txt"):
+def save_biases_and_weights(net, bias_file="../bias.txt", weight_file="../weights.txt"):
     # Ghi bias theo thứ tự:
     # hidden1 -> hidden2 -> output
     with open(bias_file, "w") as fb:

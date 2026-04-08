@@ -53,8 +53,8 @@ __pycache__/
 venv/
 .env/
 # Bỏ qua các file weights hoặc dataset dung lượng lớn (Nên tải qua link ngoài hoặc dùng Git LFS)
-model/datasets/
-model/weights/
+model/*.txt
+model/**/*.exe
 model/MATLAB/
 
 # ==========================================

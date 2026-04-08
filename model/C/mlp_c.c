@@ -43,7 +43,7 @@ int main()
 	//loading bias from txt file to weights matrix
 
 	FILE *bias_file;
-	bias_file = fopen("bias.txt", "r");							//accessing bias.txt file
+	bias_file = fopen("../bias.txt", "r");							//accessing bias.txt file
 
 	int stored_lines = 0;										//number of stored lines of bias.txt file
 
@@ -74,7 +74,7 @@ int main()
     //loading weights from txt file to weights matrix
 
     FILE *fw;
-	fw = fopen("weights.txt", "r");
+	fw = fopen("../weights.txt", "r");
 
 	int wline = 0, c1 = 0, c2 = 0;
 

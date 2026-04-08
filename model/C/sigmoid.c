@@ -21,7 +21,7 @@ int main()
 	printf("rightBoundary = %f \n",rightBoundary);
 	printf("numOfSteps = %d \n",numOfSteps);
 	
-	f = fopen("sigmoid.txt","w");
+	f = fopen("../sigmoid.txt","w");
 	
 	for(beta=1;beta<=1;beta++)
 	{
