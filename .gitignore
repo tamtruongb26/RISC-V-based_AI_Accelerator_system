@@ -1,0 +1,84 @@
+# ==========================================
+# 1. FPGA / Vivado Synthesis & Implementation
+# ==========================================
+# Bỏ qua các file log, journal và thư mục build tự động sinh ra của Vivado
+*.jou
+*.log
+*.str
+*.pb
+*.wdb
+.Xil/
+# Nếu bạn lưu project Vivado trong thư mục fpga/, bỏ qua các thư mục chạy tổng hợp
+fpga/**/*.runs/
+fpga/**/*.sim/
+fpga/**/*.cache/
+fpga/**/*.hw/
+fpga/**/*.ip_user_files/
+# Các file bitstream hoặc hardware handoff (có thể dung lượng rất lớn)
+*.bit
+*.bin
+*.xsa
+*.hwdef
+
+# ==========================================
+# 2. Simulation (Vivado Simulator, Verilator)
+# ==========================================
+# File dạng sóng (Waveform) rất nặng, không nên commit
+*.vcd
+*.fst
+*.wcfg
+# Thư mục build của trình mô phỏng
+xsim.dir/
+sim_build/
+*.dir/
+
+# ==========================================
+# 3. Software / Firmware (C/C++ cho RISC-V)
+# ==========================================
+# Bỏ qua các file object và file thực thi sau khi biên dịch
+*.o
+*.elf
+*.map
+*.out
+# Bỏ qua thư mục build chung của phần mềm
+sw/build/
+sw/bin/
+
+# ==========================================
+# 4. Machine Learning / Python Scripts
+# ==========================================
+# Bỏ qua cache của Python
+__pycache__/
+# Thư mục môi trường ảo
+venv/
+.env/
+# Bỏ qua các file weights hoặc dataset dung lượng lớn (Nên tải qua link ngoài hoặc dùng Git LFS)
+model/datasets/
+model/weights/
+model/MATLAB/
+
+# ==========================================
+# 5. Documentation (LaTeX)
+# ==========================================
+# Bỏ qua các file biên dịch trung gian của LaTeX khi viết báo cáo
+*.aux
+*.bbl
+*.blg
+*.fls
+*.out
+*.toc
+*.fdb_latexmk
+*.synctex.gz
+*.lof
+*.lot
+# Chỉ nên giữ lại file .tex (source) và file .pdf (nếu cần thiết)
+
+# ==========================================
+# 6. IDE / OS Files
+# ==========================================
+# VS Code
+.vscode/
+# Các file hệ thống sinh ra
+.DS_Store
+Thumbs.db
+*.swp
