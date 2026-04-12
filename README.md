@@ -42,3 +42,4 @@ sw/             - C firmware
 
 ## Based on
 - [Deep-Neural-Network-Hardware-Accelerator](https://github.com/StefanSredojevic/Deep-Neural-Network-Hardware-Accelerator)
+- [PicoRV32](https://github.com/YosysHQ/picorv32) RISC-V core
