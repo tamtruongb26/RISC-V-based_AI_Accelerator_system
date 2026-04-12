@@ -74,7 +74,12 @@ model/MATLAB/
 # Chỉ nên giữ lại file .tex (source) và file .pdf (nếu cần thiết)
 
 # ==========================================
-# 6. IDE / OS Files
+# 6. references
+# ==========================================
+references/
+
+# ==========================================
+# 7. IDE / OS Files
 # ==========================================
 # VS Code
 .vscode/
