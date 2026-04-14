@@ -13,6 +13,9 @@ fpga/**/*.runs/
 fpga/**/*.sim/
 fpga/**/*.cache/
 fpga/**/*.hw/
+fpga/**/*.gen/
+fpga/**/*.tmp/
+fpga/ip_upgrade.log
 fpga/**/*.ip_user_files/
 # Các file bitstream hoặc hardware handoff (có thể dung lượng rất lớn)
 *.bit

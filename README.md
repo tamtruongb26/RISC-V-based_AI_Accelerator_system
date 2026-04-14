@@ -13,14 +13,17 @@ A RISC-V (PicoRV32) based neural network hardware accelerator targeting the **Ul
 
 
 ### Architecture
-```
-PicoRV32 (RISC-V) ──AXI──> AXI Interconnect
-                              ├──> MLP Accelerator (AXI-Lite control)
-                              ├──> AXI DMA (config) ──AXI-Stream──> MLP Accelerator
-                              ├──> Boot BRAM (firmware)
-                              └──> SW Reset
-                            
-AXI DMA ──AXI──> SmartConnect ──> Zynq PS HP Port ──> DDR4
+```text
+Zynq PS ───────── AXI ─────────┐
+PicoRV32 (RISC-V) ── AXI ──────┼──> SmartConnect (Crossbar)
+AXI DMA (MM2S/S2MM) ─ AXI ─────┘         │
+                                         ├──> MLP Accelerator (AXI-Lite)
+                                         ├──> AXI DMA (AXI-Lite config)
+                                         ├──> Shared Boot BRAM (firmware & data)
+                                         ├──> SW Reset
+                                         └──> Zynq PS HP0 Port (DDR4 access)
+
+AXI DMA ── AXI-Stream ──> MLP Accelerator ── AXI-Stream ──> AXI DMA
 ```
 
 
