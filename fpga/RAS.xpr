@@ -50,9 +50,6 @@
     <Option Name="ProjectType" Val="Default"/>
     <Option Name="IPRepoPath" Val="$PPRDIR/../hw/accelerator_1_0"/>
     <Option Name="IPRepoPath" Val="$PPRDIR/../hw/sw_reset_1_0"/>
-    <Option Name="IPRepoPath" Val="$PPRDIR/../hw/accelerator_1_0"/>
-    <Option Name="IPRepoPath" Val="$PPRDIR/../ip_repo/sw_reset_1_0"/>
-    <Option Name="IPRepoPath" Val="$PPRDIR/../ip_repo/Accelerator_1_0"/>
     <Option Name="IPRepoPath" Val="$PPRDIR/../references/picorv32-vivado-ip-main/picorv32-vivado-ip-main"/>
     <Option Name="IPOutputRepo" Val="$PCACHEDIR/ip"/>
     <Option Name="IPDefaultOutputPath" Val="$PGENDIR/sources_1"/>
