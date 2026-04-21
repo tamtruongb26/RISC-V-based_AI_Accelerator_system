@@ -1,0 +1,3 @@
+https://xilinx.github.io/Embedded-Design-Tutorials/docs/2021.2/build/html/docs/Introduction/ZynqMPSoC-EDT/6-build-linux-sw-for-ps.html
+
+
