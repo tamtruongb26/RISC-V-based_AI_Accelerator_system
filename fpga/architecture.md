@@ -61,6 +61,18 @@ The SmartConnect tracks exactly which Master connects to which Slave using **Add
 | `0x4001_0000` - `0x4001_FFFF` | N/A | 64KB | AXI DMA | DMA control/status (regs to 0x58) |
 | N/A | `0xA003_0000` - `0xA003_FFFF` | 64KB | SW Reset | Software reset controller (Wakes Pico) |
 
+Current board-demo DDR sub-layout:
+
+| Address | Contents |
+|---|---|
+| `0x1000_0000` | MNIST image, packed as two pixels per word |
+| `0x1000_1000` | Biases, one packed bias pair per neuron pair |
+| `0x1000_2000` | Weights, packed as `[neuronB_i | neuronA_i]` |
+| `0x1010_0000` | Hidden layer 1 output |
+| `0x1010_0100` | Hidden layer 2 output |
+| `0x1010_0200` | Final output |
+| `0x1010_1000` | DDR mailbox written by PicoRV32 and polled by PS |
+
 ## Neural Network Architecture
 
 - **Type**: Multi-Layer Perceptron (MLP)

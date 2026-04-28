@@ -2,6 +2,7 @@
 // sigmoid_lookup.sv
 // MLP Accelerator 
 //==============================================================================
+`timescale 1ns / 1ps
 
 module sigmoid_lookup (
     input               pi_clk,

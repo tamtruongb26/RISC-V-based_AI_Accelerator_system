@@ -20,14 +20,14 @@
       },
       "project_parameters": {
         "ARCHITECTURE": [ { "value": "zynquplus", "usage": "all" } ],
-        "BASE_BOARD_PART": [ { "value": "avnet-tria:ultra96v2:part0:1.3", "usage": "all" } ],
+        "BASE_BOARD_PART": [ { "value": "", "usage": "all" } ],
         "BOARD_CONNECTIONS": [ { "value": "", "usage": "all" } ],
         "DEVICE": [ { "value": "xczu3eg", "usage": "all" } ],
         "NEXTGEN_VERSAL": [ { "value": "0", "usage": "all" } ],
         "PACKAGE": [ { "value": "sbva484", "usage": "all" } ],
         "PREFHDL": [ { "value": "VERILOG", "usage": "all" } ],
         "SILICON_REVISION": [ { "value": "", "usage": "all" } ],
-        "SIMULATOR_LANGUAGE": [ { "value": "VERILOG", "usage": "all" } ],
+        "SIMULATOR_LANGUAGE": [ { "value": "MIXED", "usage": "all" } ],
         "SPEEDGRADE": [ { "value": "-1", "usage": "all" } ],
         "STATIC_POWER": [ { "value": "", "usage": "all" } ],
         "TEMPERATURE_GRADE": [ { "value": "I", "usage": "all" } ]
@@ -191,5 +191,5 @@
       }
     }
   },
-  "checksum": "41edc5ed"
+  "checksum": "8f3b3d46"
 }

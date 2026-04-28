@@ -147,8 +147,10 @@ module control_unit(
     // a. Input BRAM
     assign po_bram_inp_ena = 1'b1;
     assign po_bram_inp_enb = 1'b1;
-    assign po_bram_inp_wea = (state == ST_LOAD_INPUTS && pi_mlp_data_valid);
-    assign po_bram_inp_web = (state == ST_LOAD_INPUTS && pi_mlp_data_valid);
+    assign po_bram_inp_wea = (state == ST_LOAD_INPUTS &&
+                              inp_cnt < (previous_layer[working_on_layer] >> 1) &&
+                              pi_mlp_data_valid);
+    assign po_bram_inp_web = po_bram_inp_wea;
     
     assign po_bram_inp_addra = (state == ST_LOAD_INPUTS) ? (inp_cnt << 1) : 
                                (state == ST_NEURON_CALC) ? (neu_cnt) : 11'd0;
@@ -158,16 +160,18 @@ module control_unit(
     // b. Bias BRAM
     assign po_bram_bia_ena = 1'b1;
     assign po_bram_bia_enb = 1'b1;
-    assign po_bram_bia_wea = (state == ST_LOAD_BIASES && pi_mlp_data_valid);
-    assign po_bram_bia_web = (state == ST_LOAD_BIASES && pi_mlp_data_valid);
+    assign po_bram_bia_wea = (state == ST_LOAD_BIASES && bia_cnt == 0 && pi_mlp_data_valid);
+    assign po_bram_bia_web = po_bram_bia_wea;
     assign po_bram_bia_addra = 11'd0; 
     assign po_bram_bia_addrb = 11'd1;
 
     // c. Weight BRAM
     assign po_bram_wei_ena = 1'b1;
     assign po_bram_wei_enb = 1'b1;
-    assign po_bram_wei_wea = (state == ST_LOAD_WEIGHTS && pi_mlp_data_valid);
-    assign po_bram_wei_web = (state == ST_LOAD_WEIGHTS && pi_mlp_data_valid);
+    assign po_bram_wei_wea = (state == ST_LOAD_WEIGHTS &&
+                              wei_cnt < previous_layer[working_on_layer] &&
+                              pi_mlp_data_valid);
+    assign po_bram_wei_web = po_bram_wei_wea;
     
     assign po_bram_wei_addra = (state == ST_LOAD_WEIGHTS) ? (wei_cnt << 1) :
                                (state == ST_NEURON_CALC) ? (neu_cnt << 1) : 11'd0;
@@ -267,11 +271,7 @@ module control_unit(
                         neu_valid_reg <= 1; 
                         neu_cnt <= neu_cnt + 1;
                     end else if (neu_cnt == previous_layer[working_on_layer]) begin
-                        // Phục vụ cycle dữ liệu cuối cùng từ BRAM
-                        neu_valid_reg <= 1; 
-                        neu_cnt <= neu_cnt + 1;
-                    end else if (neu_cnt == previous_layer[working_on_layer] + 1) begin
-                        // Kết thúc chuỗi tích lũy
+                        // Kết thúc sau cycle tích lũy dữ liệu cuối cùng từ BRAM.
                         neu_valid_reg <= 0;
                         state <= ST_WAIT_SIG;
                     end else begin

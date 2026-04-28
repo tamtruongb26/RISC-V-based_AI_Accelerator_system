@@ -1143,12 +1143,12 @@
           },
           "PSU__PROTECTION__FPD_SEGMENTS": {
             "value": [
-              "SA:0xFD1A0000; SIZE:1280; UNIT:KB; RegionTZ:Secure; WrAllowed:Read/Write; subsystemId:PMU Firmware |  SA:0xFD000000; SIZE:64; UNIT:KB; RegionTZ:Secure; WrAllowed:Read/Write; subsystemId:PMU Firmware |",
-              " SA:0xFD010000; SIZE:64; UNIT:KB; RegionTZ:Secure; WrAllowed:Read/Write; subsystemId:PMU Firmware |  SA:0xFD020000; SIZE:64; UNIT:KB; RegionTZ:Secure; WrAllowed:Read/Write; subsystemId:PMU Firmware | ",
-              "SA:0xFD030000; SIZE:64; UNIT:KB; RegionTZ:Secure; WrAllowed:Read/Write; subsystemId:PMU Firmware |  SA:0xFD040000; SIZE:64; UNIT:KB; RegionTZ:Secure; WrAllowed:Read/Write; subsystemId:PMU Firmware | ",
-              "SA:0xFD050000; SIZE:64; UNIT:KB; RegionTZ:Secure; WrAllowed:Read/Write; subsystemId:PMU Firmware |  SA:0xFD610000; SIZE:512; UNIT:KB; RegionTZ:Secure; WrAllowed:Read/Write; subsystemId:PMU Firmware | ",
-              "SA:0xFD5D0000; SIZE:64; UNIT:KB; RegionTZ:Secure; WrAllowed:Read/Write; subsystemId:PMU Firmware | SA:0xFD1A0000 ; SIZE:1280; UNIT:KB; RegionTZ:Secure ; WrAllowed:Read/Write; subsystemId:Secure",
-              "Subsystem"
+              "SA:0xFD1A0000; SIZE:1280; UNIT:KB; RegionTZ:Secure; WrAllowed:Read/Write; subsystemId:PMU Firmware  |   SA:0xFD000000; SIZE:64; UNIT:KB; RegionTZ:Secure; WrAllowed:Read/Write; subsystemId:PMU Firmware",
+              " |   SA:0xFD010000; SIZE:64; UNIT:KB; RegionTZ:Secure; WrAllowed:Read/Write; subsystemId:PMU Firmware  |   SA:0xFD020000; SIZE:64; UNIT:KB; RegionTZ:Secure; WrAllowed:Read/Write; subsystemId:PMU",
+              "Firmware  |   SA:0xFD030000; SIZE:64; UNIT:KB; RegionTZ:Secure; WrAllowed:Read/Write; subsystemId:PMU Firmware  |   SA:0xFD040000; SIZE:64; UNIT:KB; RegionTZ:Secure; WrAllowed:Read/Write;",
+              "subsystemId:PMU Firmware  |   SA:0xFD050000; SIZE:64; UNIT:KB; RegionTZ:Secure; WrAllowed:Read/Write; subsystemId:PMU Firmware  |   SA:0xFD610000; SIZE:512; UNIT:KB; RegionTZ:Secure;",
+              "WrAllowed:Read/Write; subsystemId:PMU Firmware  |   SA:0xFD5D0000; SIZE:64; UNIT:KB; RegionTZ:Secure; WrAllowed:Read/Write; subsystemId:PMU Firmware  |  SA:0xFD1A0000 ; SIZE:1280; UNIT:KB;",
+              "RegionTZ:Secure ; WrAllowed:Read/Write; subsystemId:Secure Subsystem"
             ]
           },
           "PSU__PROTECTION__MASTERS": {
@@ -1525,6 +1525,7 @@
         "xci_name": "RAS_picorv32_0_0",
         "xci_path": "ip/RAS_picorv32_0_0/RAS_picorv32_0_0.xci",
         "inst_hier_path": "picorv32_0",
+        "has_run_ip_tcl": "true",
         "parameters": {
           "BARREL_SHIFTER": {
             "value": "true"
@@ -2095,7 +2096,7 @@
       },
       "accelerator_0": {
         "vlnv": "xilinx.com:user:accelerator:1.0",
-        "ip_revision": "6",
+        "ip_revision": "7",
         "xci_name": "RAS_accelerator_0_1",
         "xci_path": "ip/RAS_accelerator_0_1/RAS_accelerator_0_1.xci",
         "inst_hier_path": "accelerator_0",
@@ -2253,12 +2254,12 @@
         "ports": [
           "proc_sys_reset_0/peripheral_aresetn",
           "sw_reset_0/s00_axi_aresetn",
-          "accelerator_0/s00_axi_aresetn",
-          "accelerator_0/s00_axis_aresetn",
-          "accelerator_0/m00_axis_aresetn",
           "axi_bram_ctrl_0/s_axi_aresetn",
           "axi_bram_ctrl_2/s_axi_aresetn",
-          "axi_dma_0/axi_resetn"
+          "axi_dma_0/axi_resetn",
+          "accelerator_0/s00_axi_aresetn",
+          "accelerator_0/s00_axis_aresetn",
+          "accelerator_0/m00_axis_aresetn"
         ]
       },
       "sw_reset_0_po_sw_rstn": {
@@ -2282,9 +2283,6 @@
       "zynq_ultra_ps_e_0_pl_clk0": {
         "ports": [
           "zynq_ultra_ps_e_0/pl_clk0",
-          "accelerator_0/m00_axis_aclk",
-          "accelerator_0/s00_axi_aclk",
-          "accelerator_0/s00_axis_aclk",
           "picorv32_0/clk",
           "sw_reset_0/s00_axi_aclk",
           "axi_bram_ctrl_0/s_axi_aclk",
@@ -2292,8 +2290,11 @@
           "axi_dma_0/s_axi_lite_aclk",
           "axi_dma_0/m_axi_mm2s_aclk",
           "axi_dma_0/m_axi_s2mm_aclk",
-          "proc_sys_reset_0/slowest_sync_clk",
           "smartconnect_0/aclk",
+          "accelerator_0/s00_axi_aclk",
+          "accelerator_0/s00_axis_aclk",
+          "accelerator_0/m00_axis_aclk",
+          "proc_sys_reset_0/slowest_sync_clk",
           "zynq_ultra_ps_e_0/maxihpm0_fpd_aclk",
           "zynq_ultra_ps_e_0/saxihp0_fpd_aclk"
         ]
