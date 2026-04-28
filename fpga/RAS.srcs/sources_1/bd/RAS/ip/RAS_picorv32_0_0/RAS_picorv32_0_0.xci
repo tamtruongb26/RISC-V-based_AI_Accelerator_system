@@ -71,7 +71,7 @@
         "PACKAGE": [ { "value": "sbva484", "usage": "all" } ],
         "PREFHDL": [ { "value": "VERILOG", "usage": "all" } ],
         "SILICON_REVISION": [ { "value": "", "usage": "all" } ],
-        "SIMULATOR_LANGUAGE": [ { "value": "MIXED", "usage": "all" } ],
+        "SIMULATOR_LANGUAGE": [ { "value": "VERILOG", "usage": "all" } ],
         "SPEEDGRADE": [ { "value": "-1", "usage": "all" } ],
         "STATIC_POWER": [ { "value": "", "usage": "all" } ],
         "TEMPERATURE_GRADE": [ { "value": "I", "usage": "all" } ]
@@ -210,5 +210,5 @@
       }
     }
   },
-  "checksum": "5ce3c861"
+  "checksum": "f2917ae7"
 }
