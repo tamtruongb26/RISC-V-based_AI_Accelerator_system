@@ -36,12 +36,17 @@ AXI DMA ── AXI-Stream ──> MLP Accelerator ── AXI-Stream ──> AXI 
 ### Project Structure
 ```
 docs/           - Documentation
-fpga/           - 
+fpga/           -
 hw/             - HDL source files (Verilog/ SystemVerilog)
 model/          - Training data & reference code
-references/     - 
+references/     -
 sw/             - C firmware
 ```
+
+### Documentation
+- [Build from zero](docs/build_from_zero.md): step-by-step construction flow, dependencies, DMA sequence, boot sequence, and debug checklist.
+- [Detailed system specification](docs/system_description.md): current architecture and component behavior.
+- [Board demo workflow](docs/board_demo.md): commands and expected Ultra96v2 PASS/FAIL flow.
 
 ## Based on
 - [Deep-Neural-Network-Hardware-Accelerator](https://github.com/StefanSredojevic/Deep-Neural-Network-Hardware-Accelerator)
