@@ -1,0 +1,65 @@
+ Fix in this order:
+
+  1. Make clocks safe
+     Easiest fix: make this a single-clock IP. Require:
+
+  s00_axi_aclk == s00_axis_aclk == m00_axis_aclk
+
+  Better HDL cleanup: use one aclk/aresetn internally and update IP metadata/BD
+  so all AXI interfaces are associated with that same clock. If you truly need
+  separate clocks, add async FIFOs between AXI-Stream and control_unit.
+
+  2. Fix drain off-by-one
+     Change:
+
+  assign po_pp_valid_in = (state == ST_DRAIN) && (drain_wait == 0);
+
+  to:
+
+  assign po_pp_valid_in =
+      (state == ST_DRAIN) &&
+      (drain_col_cnt < pi_tile_n_size[3:0]);
+
+  Also change ST_DRAIN so it transitions immediately when all valid columns were
+  sent.
+
+  3. Use datapath valid
+     In ST_COMPUTE/ST_DRAIN, do not rely only on drain_wait >= SA_N. Use
+     pi_dp_result_valid to know when output columns are actually valid. At
+     minimum, gate drain start on something like:
+
+  if (&pi_dp_result_valid) begin
+      state <= ST_DRAIN;
+      drain_col_cnt <= 0;
+  end
+
+  4. Limit or fix parameterization
+     For now, enforce:
+
+  SA_N = 8
+  tile_m_size: 1..8
+  tile_k_size: even, 2..8
+  tile_n_size: 1..8
+
+  If you want real generic support, replace hard-coded [2:0], [3:0], and SA_N/2
+  assumptions with $clog2(SA_N)-based counters and ceil_div.
+
+  5. Fix AXI-Lite write handshake
+     Register writes should occur only when the write transaction is accepted,
+     not just when S_AXI_WVALID is high. Use a proper slv_reg_wren signal:
+
+  wire slv_reg_wren = axi_wready && S_AXI_WVALID && axi_awready &&
+  S_AXI_AWVALID;
+
+  Then gate register writes with slv_reg_wren.
+
+  6. Fix test scripts
+     Remove this line from both simulation Tcl scripts:
+
+  run all
+
+  because launch_simulation already runs the generated sim Tcl, and your
+  testbench calls $finish.
+
+  Best first patch: fix control_unit.sv off-by-one, add tile-size validation or
+  documented limits, and enforce one clock in accelerator.v/IP packaging.
