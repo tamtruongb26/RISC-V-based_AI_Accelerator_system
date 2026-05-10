@@ -1,0 +1,7 @@
+[
+{
+  "directory": "/home/tam/Documents/RAAS/sw/vitis/RAS_application_2_0/build",
+  "command": "/home/tam/Documents/app/2025.2.1/Vitis/gnu/aarch64/lin/aarch64-none/bin/aarch64-none-elf-gcc -I/home/tam/Documents/RAAS/sw/vitis/RAS_application_2_0/src -isystem /home/tam/Documents/RAAS/sw/vitis/RAS_platform/export/RAS_platform/sw/standalone_psu_cortexa53_0/include -isystem /home/tam/Documents/app/2025.2.1/gnu/aarch64/lin/aarch64-none/x86_64-oesdk-linux/usr/lib/aarch64-xilinx-elf/gcc/aarch64-xilinx-elf/13.3.0/include -isystem /home/tam/Documents/app/2025.2.1/gnu/aarch64/lin/aarch64-none/x86_64-oesdk-linux/usr/lib/aarch64-xilinx-elf/gcc/aarch64-xilinx-elf/13.3.0/include-fixed -isystem /home/tam/Documents/app/2025.2.1/Vitis/gnu/aarch64/lin/aarch64-none/aarch64-xilinx-elf/usr/include  -DSDT  -MMD -MP -specs=/home/tam/Documents/RAAS/sw/vitis/RAS_platform/export/RAS_platform/sw/standalone_psu_cortexa53_0/Xilinx.spec -I/home/tam/Documents/RAAS/sw/vitis/RAS_platform/export/RAS_platform/sw/standalone_psu_cortexa53_0/include -Wall -Wextra      -O0  -g3     -U__clang__ -o CMakeFiles/RAS_application_2_0.elf.dir/main.c.obj -c /home/tam/Documents/RAAS/sw/vitis/RAS_application_2_0/src/main.c",
+  "file": "/home/tam/Documents/RAAS/sw/vitis/RAS_application_2_0/src/main.c"
+}
+]
