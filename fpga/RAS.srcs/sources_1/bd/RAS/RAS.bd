@@ -14,15 +14,14 @@
       "zynq_ultra_ps_e_0": "",
       "picorv32_0": "",
       "proc_sys_reset_0": "",
-      "util_vector_logic_0": "",
       "axi_dma_0": "",
       "smartconnect_0": "",
       "axi_bram_ctrl_0": "",
       "blk_mem_gen_0": "",
       "sw_reset_0": "",
-      "accelerator_0": "",
       "axi_bram_ctrl_2": "",
-      "xlslice_0": ""
+      "xlslice_0": "",
+      "accelerator_0": ""
     },
     "components": {
       "zynq_ultra_ps_e_0": {
@@ -1590,22 +1589,6 @@
         "inst_hier_path": "proc_sys_reset_0",
         "has_run_ip_tcl": "true"
       },
-      "util_vector_logic_0": {
-        "vlnv": "xilinx.com:ip:util_vector_logic:2.0",
-        "ip_revision": "5",
-        "xci_name": "RAS_util_vector_logic_0_0",
-        "xci_path": "ip/RAS_util_vector_logic_0_0/RAS_util_vector_logic_0_0.xci",
-        "inst_hier_path": "util_vector_logic_0",
-        "has_run_ip_tcl": "true",
-        "parameters": {
-          "C_OPERATION": {
-            "value": "not"
-          },
-          "C_SIZE": {
-            "value": "1"
-          }
-        }
-      },
       "axi_dma_0": {
         "vlnv": "xilinx.com:ip:axi_dma:7.1",
         "ip_revision": "37",
@@ -2094,14 +2077,6 @@
         "inst_hier_path": "sw_reset_0",
         "has_run_ip_tcl": "true"
       },
-      "accelerator_0": {
-        "vlnv": "xilinx.com:user:accelerator:1.0",
-        "ip_revision": "7",
-        "xci_name": "RAS_accelerator_0_1",
-        "xci_path": "ip/RAS_accelerator_0_1/RAS_accelerator_0_1.xci",
-        "inst_hier_path": "accelerator_0",
-        "has_run_ip_tcl": "true"
-      },
       "axi_bram_ctrl_2": {
         "vlnv": "xilinx.com:ip:axi_bram_ctrl:4.1",
         "ip_revision": "13",
@@ -2137,6 +2112,14 @@
             "value": "8"
           }
         }
+      },
+      "accelerator_0": {
+        "vlnv": "user.org:user:accelerator:2.0",
+        "ip_revision": "2",
+        "xci_name": "RAS_accelerator_0_0",
+        "xci_path": "ip/RAS_accelerator_0_0/RAS_accelerator_0_0.xci",
+        "inst_hier_path": "accelerator_0",
+        "has_run_ip_tcl": "true"
       }
     },
     "interface_nets": {
@@ -2160,8 +2143,8 @@
       },
       "axi_dma_0_M_AXIS_MM2S": {
         "interface_ports": [
-          "accelerator_0/S00_AXIS",
-          "axi_dma_0/M_AXIS_MM2S"
+          "axi_dma_0/M_AXIS_MM2S",
+          "accelerator_0/S00_AXIS"
         ]
       },
       "axi_dma_0_M_AXI_MM2S": {
@@ -2190,8 +2173,8 @@
       },
       "smartconnect_0_M01_AXI": {
         "interface_ports": [
-          "smartconnect_0/M01_AXI",
-          "accelerator_0/S00_AXI"
+          "accelerator_0/S00_AXI",
+          "smartconnect_0/M01_AXI"
         ]
       },
       "smartconnect_0_M02_AXI": {
@@ -2244,12 +2227,6 @@
           "xlslice_0/Din"
         ]
       },
-      "proc_sys_reset_0_mb_reset": {
-        "ports": [
-          "proc_sys_reset_0/mb_reset",
-          "util_vector_logic_0/Op1"
-        ]
-      },
       "proc_sys_reset_0_peripheral_aresetn": {
         "ports": [
           "proc_sys_reset_0/peripheral_aresetn",
@@ -2265,12 +2242,6 @@
       "sw_reset_0_po_sw_rstn": {
         "ports": [
           "sw_reset_0/po_sw_rstn",
-          "proc_sys_reset_0/aux_reset_in"
-        ]
-      },
-      "util_vector_logic_0_Res": {
-        "ports": [
-          "util_vector_logic_0/Res",
           "picorv32_0/resetn"
         ]
       },
@@ -2291,12 +2262,12 @@
           "axi_dma_0/m_axi_mm2s_aclk",
           "axi_dma_0/m_axi_s2mm_aclk",
           "smartconnect_0/aclk",
-          "accelerator_0/s00_axi_aclk",
-          "accelerator_0/s00_axis_aclk",
-          "accelerator_0/m00_axis_aclk",
           "proc_sys_reset_0/slowest_sync_clk",
           "zynq_ultra_ps_e_0/maxihpm0_fpd_aclk",
-          "zynq_ultra_ps_e_0/saxihp0_fpd_aclk"
+          "zynq_ultra_ps_e_0/saxihp0_fpd_aclk",
+          "accelerator_0/s00_axi_aclk",
+          "accelerator_0/s00_axis_aclk",
+          "accelerator_0/m00_axis_aclk"
         ]
       },
       "zynq_ultra_ps_e_0_pl_resetn0": {
@@ -2313,7 +2284,7 @@
             "segments": {
               "SEG_accelerator_0_S00_AXI_reg": {
                 "address_block": "/accelerator_0/S00_AXI/S00_AXI_reg",
-                "offset": "0x0040000000",
+                "offset": "0x00A0010000",
                 "range": "64K",
                 "is_excluded": "TRUE",
                 "offset_base_param": "C_S00_AXI_BASEADDR",
@@ -2421,7 +2392,7 @@
             "segments": {
               "SEG_accelerator_0_S00_AXI_reg": {
                 "address_block": "/accelerator_0/S00_AXI/S00_AXI_reg",
-                "offset": "0x40000000",
+                "offset": "0xA0010000",
                 "range": "64K",
                 "is_excluded": "TRUE",
                 "offset_base_param": "C_S00_AXI_BASEADDR",
@@ -2471,7 +2442,7 @@
             "segments": {
               "SEG_accelerator_0_S00_AXI_reg": {
                 "address_block": "/accelerator_0/S00_AXI/S00_AXI_reg",
-                "offset": "0x40000000",
+                "offset": "0xA0010000",
                 "range": "64K",
                 "is_excluded": "TRUE",
                 "offset_base_param": "C_S00_AXI_BASEADDR",

@@ -1,48 +1,45 @@
 {
    "ActiveEmotionalView":"Default View",
-   "Default View_ScaleFactor":"0.507623",
-   "Default View_TopLeft":"20,-33",
+   "Default View_ScaleFactor":"0.745589",
+   "Default View_TopLeft":"664,181",
    "ExpandedHierarchyInLayout":"",
    "guistr":"# # String gsaved with Nlview 7.8.0 2024-04-26 e1825d835c VDI=44 GEI=38 GUI=JA:21.0 TLS
 #  -string -flagsOSRD
-preplace inst zynq_ultra_ps_e_0 -pg 1 -lvl 3 -x 1060 -y 680 -defaultsOSRD
-preplace inst picorv32_0 -pg 1 -lvl 3 -x 1060 -y 520 -defaultsOSRD
-preplace inst proc_sys_reset_0 -pg 1 -lvl 1 -x 220 -y 790 -defaultsOSRD
-preplace inst util_vector_logic_0 -pg 1 -lvl 2 -x 590 -y 520 -defaultsOSRD
-preplace inst axi_dma_0 -pg 1 -lvl 3 -x 1060 -y 300 -defaultsOSRD
-preplace inst smartconnect_0 -pg 1 -lvl 4 -x 1550 -y 320 -defaultsOSRD
-preplace inst axi_bram_ctrl_0 -pg 1 -lvl 5 -x 1880 -y 470 -defaultsOSRD
-preplace inst blk_mem_gen_0 -pg 1 -lvl 6 -x 2140 -y 340 -defaultsOSRD
-preplace inst sw_reset_0 -pg 1 -lvl 5 -x 1880 -y 610 -defaultsOSRD
-preplace inst accelerator_0 -pg 1 -lvl 5 -x 1880 -y 140 -defaultsOSRD
-preplace inst axi_bram_ctrl_2 -pg 1 -lvl 5 -x 1880 -y 330 -defaultsOSRD
-preplace inst xlslice_0 -pg 1 -lvl 2 -x 590 -y 710 -defaultsOSRD
-preplace netloc ARESETN_1 1 1 3 400J 170 NJ 170 1390
-preplace netloc axi_dma_0_s2mm_introut 1 2 2 760 420 1370
-preplace netloc picorv32_0_eoi 1 1 3 440 790 NJ 790 1370
-preplace netloc proc_sys_reset_0_mb_reset 1 1 1 420 520n
-preplace netloc proc_sys_reset_0_peripheral_aresetn 1 1 4 430 460 750 430 NJ 430 1740
-preplace netloc sw_reset_0_po_sw_rstn 1 0 6 40 890 NJ 890 NJ 890 NJ 890 NJ 890 2020
-preplace netloc util_vector_logic_0_Res 1 2 1 NJ 520
-preplace netloc xlslice_0_Dout 1 2 1 NJ 710
-preplace netloc zynq_ultra_ps_e_0_pl_clk0 1 0 5 40 690 410J 770 740 440 1410 440 1730
-preplace netloc zynq_ultra_ps_e_0_pl_resetn0 1 0 4 30 900 NJ 900 NJ 900 1360
-preplace netloc accelerator_0_M00_AXIS 1 2 4 740 10 NJ 10 NJ 10 2020
-preplace netloc axi_bram_ctrl_0_BRAM_PORTA 1 5 1 2020 350n
-preplace netloc axi_bram_ctrl_2_BRAM_PORTA 1 5 1 N 330
-preplace netloc axi_dma_0_M_AXIS_MM2S 1 3 2 1370 90 NJ
-preplace netloc axi_dma_0_M_AXI_MM2S 1 3 1 1410 240n
-preplace netloc axi_dma_0_M_AXI_S2MM 1 3 1 1380 260n
-preplace netloc picorv32_0_M_AXI 1 3 1 1380 310n
-preplace netloc smartconnect_0_M00_AXI 1 2 3 760 780 NJ 780 1690
-preplace netloc smartconnect_0_M01_AXI 1 4 1 1720 70n
-preplace netloc smartconnect_0_M02_AXI 1 4 1 N 310
-preplace netloc smartconnect_0_M03_AXI 1 4 1 1720 330n
-preplace netloc smartconnect_0_M04_AXI 1 2 3 760 180 NJ 180 1700
-preplace netloc smartconnect_0_M05_AXI 1 4 1 1710 370n
-preplace netloc zynq_ultra_ps_e_0_M_AXI_HPM0_FPD 1 3 1 1400 330n
-levelinfo -pg 1 0 220 590 1060 1550 1880 2140 2260
-pagesize -pg 1 -db -bbox -sgen 0 0 2260 920
+preplace inst zynq_ultra_ps_e_0 -pg 1 -lvl 4 -x 1340 -y 420 -defaultsOSRD
+preplace inst picorv32_0 -pg 1 -lvl 4 -x 1340 -y 600 -defaultsOSRD
+preplace inst proc_sys_reset_0 -pg 1 -lvl 1 -x 200 -y 240 -defaultsOSRD
+preplace inst axi_dma_0 -pg 1 -lvl 4 -x 1340 -y 130 -defaultsOSRD
+preplace inst smartconnect_0 -pg 1 -lvl 5 -x 1820 -y 390 -defaultsOSRD
+preplace inst axi_bram_ctrl_0 -pg 1 -lvl 6 -x 2170 -y 490 -defaultsOSRD
+preplace inst blk_mem_gen_0 -pg 1 -lvl 7 -x 2430 -y 360 -defaultsOSRD
+preplace inst sw_reset_0 -pg 1 -lvl 6 -x 2170 -y 630 -defaultsOSRD
+preplace inst axi_bram_ctrl_2 -pg 1 -lvl 6 -x 2170 -y 350 -defaultsOSRD
+preplace inst xlslice_0 -pg 1 -lvl 3 -x 840 -y 450 -defaultsOSRD
+preplace inst accelerator_0 -pg 1 -lvl 6 -x 2170 -y 160 -defaultsOSRD
+preplace netloc ARESETN_1 1 1 4 NJ 260 NJ 260 940J 270 1650
+preplace netloc axi_dma_0_s2mm_introut 1 3 2 1030 300 1640
+preplace netloc picorv32_0_eoi 1 2 3 740 520 NJ 520 1640
+preplace netloc xlslice_0_Dout 1 3 1 NJ 450
+preplace netloc zynq_ultra_ps_e_0_pl_clk0 1 0 6 20 140 NJ 140 NJ 140 1010 290 1670 270 2010
+preplace netloc zynq_ultra_ps_e_0_pl_resetn0 1 0 5 20 340 NJ 340 NJ 340 1020J 330 1640
+preplace netloc sw_reset_0_po_sw_rstn 1 3 4 1040 710 NJ 710 NJ 710 2310
+preplace netloc proc_sys_reset_0_peripheral_aresetn 1 1 5 NJ 280 NJ 280 1000 260 1650J 240 2020
+preplace netloc accelerator_0_M00_AXIS 1 3 4 1040 10 NJ 10 NJ 10 2310
+preplace netloc axi_bram_ctrl_0_BRAM_PORTA 1 6 1 2310 370n
+preplace netloc axi_bram_ctrl_2_BRAM_PORTA 1 6 1 N 350
+preplace netloc axi_dma_0_M_AXIS_MM2S 1 4 2 N 110 NJ
+preplace netloc axi_dma_0_M_AXI_MM2S 1 4 1 1680 70n
+preplace netloc axi_dma_0_M_AXI_S2MM 1 4 1 1660 90n
+preplace netloc picorv32_0_M_AXI 1 4 1 1680 380n
+preplace netloc smartconnect_0_M00_AXI 1 3 3 1040 280 NJ 280 1960
+preplace netloc smartconnect_0_M01_AXI 1 5 1 1980 90n
+preplace netloc smartconnect_0_M02_AXI 1 5 1 2030 330n
+preplace netloc smartconnect_0_M03_AXI 1 5 1 1980 400n
+preplace netloc smartconnect_0_M04_AXI 1 3 3 1030 250 NJ 250 1970
+preplace netloc smartconnect_0_M05_AXI 1 5 1 1960 440n
+preplace netloc zynq_ultra_ps_e_0_M_AXI_HPM0_FPD 1 4 1 N 400
+levelinfo -pg 1 0 200 530 840 1340 1820 2170 2430 2550
+pagesize -pg 1 -db -bbox -sgen 0 0 2550 850
 "
 }
 {
