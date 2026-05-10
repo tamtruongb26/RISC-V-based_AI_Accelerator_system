@@ -36,6 +36,7 @@ AXI DMA ── AXI-Stream ──> MLP Accelerator ── AXI-Stream ──> AXI 
 ### Project Structure
 ```
 docs/           - Documentation
+build/          - Generated artifacts (simulation, bitstream, XSA)
 fpga/           -
 hw/             - HDL source files (Verilog/ SystemVerilog)
 model/          - Training data & reference code
