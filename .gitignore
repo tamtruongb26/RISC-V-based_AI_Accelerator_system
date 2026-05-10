@@ -1,4 +1,6 @@
-implementation_plan.md
+CLAUDE.md
+.codex
+/report
 
 # ==========================================
 # 1. FPGA / Vivado Synthesis & Implementation
@@ -9,6 +11,7 @@ implementation_plan.md
 *.str
 *.pb
 *.wdb
+*.dcp
 .Xil/
 # Nếu bạn lưu project Vivado trong thư mục fpga/, bỏ qua các thư mục chạy tổng hợp
 fpga/**/*.runs/
@@ -36,6 +39,11 @@ fpga/**/*.ip_user_files/
 xsim.dir/
 sim_build/
 *.dir/
+sim/xsim/
+
+# Build artifacts (centralized outputs)
+build/
+
 
 # ==========================================
 # 3. Software / Firmware (C/C++ cho RISC-V)
@@ -79,6 +87,11 @@ model/MATLAB/
 # Chỉ nên giữ lại file .tex (source) và file .pdf (nếu cần thiết)
 
 # ==========================================
+# 6. Tools
+# ==========================================
+/tools/golden
+
+# ==========================================
 # 6. references
 # ==========================================
 references/
@@ -88,6 +101,8 @@ references/
 # ==========================================
 # VS Code
 .vscode/
+# Other local tooling
+.codex/
 # Các file hệ thống sinh ra
 .DS_Store
 Thumbs.db
