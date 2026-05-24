@@ -69,12 +69,12 @@
     <Option Name="WTVcsLaunchSim" Val="0"/>
     <Option Name="WTRivieraLaunchSim" Val="0"/>
     <Option Name="WTActivehdlLaunchSim" Val="0"/>
-    <Option Name="WTXSimExportSim" Val="13"/>
-    <Option Name="WTModelSimExportSim" Val="13"/>
-    <Option Name="WTQuestaExportSim" Val="13"/>
+    <Option Name="WTXSimExportSim" Val="15"/>
+    <Option Name="WTModelSimExportSim" Val="15"/>
+    <Option Name="WTQuestaExportSim" Val="15"/>
     <Option Name="WTIesExportSim" Val="0"/>
-    <Option Name="WTVcsExportSim" Val="13"/>
-    <Option Name="WTRivieraExportSim" Val="13"/>
+    <Option Name="WTVcsExportSim" Val="15"/>
+    <Option Name="WTRivieraExportSim" Val="15"/>
     <Option Name="WTActivehdlExportSim" Val="3"/>
     <Option Name="GenerateIPUpgradeLog" Val="TRUE"/>
     <Option Name="XSimRadix" Val="hex"/>
@@ -183,6 +183,12 @@
         <CompFileExtendedInfo CompFileName="RAS.bd" FileRelPathName="ip/RAS_axi_dma_0_0/RAS_axi_dma_0_0.xci">
           <Proxy FileSetName="RAS_axi_dma_0_0"/>
         </CompFileExtendedInfo>
+        <CompFileExtendedInfo CompFileName="RAS.bd" FileRelPathName="ip/RAS_axi_perf_mon_0_0/RAS_axi_perf_mon_0_0.xci">
+          <Proxy FileSetName="RAS_axi_perf_mon_0_0"/>
+        </CompFileExtendedInfo>
+        <CompFileExtendedInfo CompFileName="RAS.bd" FileRelPathName="ip/RAS_axi_timer_0_0/RAS_axi_timer_0_0.xci">
+          <Proxy FileSetName="RAS_axi_timer_0_0"/>
+        </CompFileExtendedInfo>
         <CompFileExtendedInfo CompFileName="RAS.bd" FileRelPathName="ip/RAS_blk_mem_gen_0_0/RAS_blk_mem_gen_0_0.xci">
           <Proxy FileSetName="RAS_blk_mem_gen_0_0"/>
         </CompFileExtendedInfo>
@@ -191,6 +197,9 @@
         </CompFileExtendedInfo>
         <CompFileExtendedInfo CompFileName="RAS.bd" FileRelPathName="ip/RAS_proc_sys_reset_0_0/RAS_proc_sys_reset_0_0.xci">
           <Proxy FileSetName="RAS_proc_sys_reset_0_0"/>
+        </CompFileExtendedInfo>
+        <CompFileExtendedInfo CompFileName="RAS.bd" FileRelPathName="ip/RAS_smartconnect_0_0/RAS_smartconnect_0_0.xci">
+          <Proxy FileSetName="RAS_smartconnect_0_0"/>
         </CompFileExtendedInfo>
         <CompFileExtendedInfo CompFileName="RAS.bd" FileRelPathName="ip/RAS_sw_reset_0_1/RAS_sw_reset_0_1.xci">
           <Proxy FileSetName="RAS_sw_reset_0_1"/>
@@ -235,13 +244,6 @@
         </FileInfo>
       </File>
       <File Path="$PIPUSERFILESDIR/bd/RAS/ip/RAS_zynq_ultra_ps_e_0_0/sim/RAS_zynq_ultra_ps_e_0_0_vip_wrapper.v">
-        <FileInfo>
-          <Attr Name="UsedIn" Val="synthesis"/>
-          <Attr Name="UsedIn" Val="implementation"/>
-          <Attr Name="UsedIn" Val="simulation"/>
-        </FileInfo>
-      </File>
-      <File Path="$PPRDIR/tb/RAS_wrapper_tb.sv">
         <FileInfo>
           <Attr Name="UsedIn" Val="synthesis"/>
           <Attr Name="UsedIn" Val="implementation"/>
@@ -342,6 +344,24 @@
     <FileSet Name="RAS_accelerator_0_0" Type="BlockSrcs" RelSrcDir="$PSRCDIR/RAS_accelerator_0_0" RelGenDir="$PGENDIR/RAS_accelerator_0_0">
       <Config>
         <Option Name="TopModule" Val="RAS_accelerator_0_0"/>
+        <Option Name="UseBlackboxStub" Val="1"/>
+      </Config>
+    </FileSet>
+    <FileSet Name="RAS_smartconnect_0_0" Type="BlockSrcs" RelSrcDir="$PSRCDIR/RAS_smartconnect_0_0" RelGenDir="$PGENDIR/RAS_smartconnect_0_0">
+      <Config>
+        <Option Name="TopModule" Val="RAS_smartconnect_0_0"/>
+        <Option Name="UseBlackboxStub" Val="1"/>
+      </Config>
+    </FileSet>
+    <FileSet Name="RAS_axi_perf_mon_0_0" Type="BlockSrcs" RelSrcDir="$PSRCDIR/RAS_axi_perf_mon_0_0" RelGenDir="$PGENDIR/RAS_axi_perf_mon_0_0">
+      <Config>
+        <Option Name="TopModule" Val="RAS_axi_perf_mon_0_0"/>
+        <Option Name="UseBlackboxStub" Val="1"/>
+      </Config>
+    </FileSet>
+    <FileSet Name="RAS_axi_timer_0_0" Type="BlockSrcs" RelSrcDir="$PSRCDIR/RAS_axi_timer_0_0" RelGenDir="$PGENDIR/RAS_axi_timer_0_0">
+      <Config>
+        <Option Name="TopModule" Val="RAS_axi_timer_0_0"/>
         <Option Name="UseBlackboxStub" Val="1"/>
       </Config>
     </FileSet>
@@ -460,7 +480,45 @@
     </Run>
     <Run Id="RAS_accelerator_0_0_synth_1" Type="Ft3:Synth" SrcSet="RAS_accelerator_0_0" Part="xczu3eg-sbva484-1-i" ConstrsSet="RAS_accelerator_0_0" Description="Vivado Synthesis Defaults" AutoIncrementalCheckpoint="false" WriteIncrSynthDcp="false" Dir="$PRUNDIR/RAS_accelerator_0_0_synth_1" IncludeInArchive="true" IsChild="false" AutoIncrementalDir="$PSRCDIR/utils_1/imports/RAS_accelerator_0_0_synth_1" AutoRQSDir="$PSRCDIR/utils_1/imports/RAS_accelerator_0_0_synth_1" ParallelReportGen="true">
       <Strategy Version="1" Minor="2">
-        <StratHandle Name="Vivado Synthesis Defaults" Flow="Vivado Synthesis 2025"/>
+        <StratHandle Name="Vivado Synthesis Defaults" Flow="Vivado Synthesis 2025">
+          <Desc>Vivado Synthesis Defaults</Desc>
+        </StratHandle>
+        <Step Id="synth_design"/>
+      </Strategy>
+      <GeneratedRun Dir="$PRUNDIR" File="gen_run.xml"/>
+      <ReportStrategy Name="Vivado Synthesis Default Reports" Flow="Vivado Synthesis 2025"/>
+      <Report Name="ROUTE_DESIGN.REPORT_METHODOLOGY" Enabled="1"/>
+      <RQSFiles/>
+    </Run>
+    <Run Id="RAS_smartconnect_0_0_synth_1" Type="Ft3:Synth" SrcSet="RAS_smartconnect_0_0" Part="xczu3eg-sbva484-1-i" ConstrsSet="RAS_smartconnect_0_0" Description="Vivado Synthesis Defaults" AutoIncrementalCheckpoint="false" WriteIncrSynthDcp="false" Dir="$PRUNDIR/RAS_smartconnect_0_0_synth_1" IncludeInArchive="true" IsChild="false" AutoIncrementalDir="$PSRCDIR/utils_1/imports/RAS_smartconnect_0_0_synth_1" AutoRQSDir="$PSRCDIR/utils_1/imports/RAS_smartconnect_0_0_synth_1" ParallelReportGen="true">
+      <Strategy Version="1" Minor="2">
+        <StratHandle Name="Vivado Synthesis Defaults" Flow="Vivado Synthesis 2025">
+          <Desc>Vivado Synthesis Defaults</Desc>
+        </StratHandle>
+        <Step Id="synth_design"/>
+      </Strategy>
+      <GeneratedRun Dir="$PRUNDIR" File="gen_run.xml"/>
+      <ReportStrategy Name="Vivado Synthesis Default Reports" Flow="Vivado Synthesis 2025"/>
+      <Report Name="ROUTE_DESIGN.REPORT_METHODOLOGY" Enabled="1"/>
+      <RQSFiles/>
+    </Run>
+    <Run Id="RAS_axi_perf_mon_0_0_synth_1" Type="Ft3:Synth" SrcSet="RAS_axi_perf_mon_0_0" Part="xczu3eg-sbva484-1-i" ConstrsSet="RAS_axi_perf_mon_0_0" Description="Vivado Synthesis Defaults" AutoIncrementalCheckpoint="false" WriteIncrSynthDcp="false" Dir="$PRUNDIR/RAS_axi_perf_mon_0_0_synth_1" IncludeInArchive="true" IsChild="false" AutoIncrementalDir="$PSRCDIR/utils_1/imports/RAS_axi_perf_mon_0_0_synth_1" AutoRQSDir="$PSRCDIR/utils_1/imports/RAS_axi_perf_mon_0_0_synth_1" ParallelReportGen="true">
+      <Strategy Version="1" Minor="2">
+        <StratHandle Name="Vivado Synthesis Defaults" Flow="Vivado Synthesis 2025">
+          <Desc>Vivado Synthesis Defaults</Desc>
+        </StratHandle>
+        <Step Id="synth_design"/>
+      </Strategy>
+      <GeneratedRun Dir="$PRUNDIR" File="gen_run.xml"/>
+      <ReportStrategy Name="Vivado Synthesis Default Reports" Flow="Vivado Synthesis 2025"/>
+      <Report Name="ROUTE_DESIGN.REPORT_METHODOLOGY" Enabled="1"/>
+      <RQSFiles/>
+    </Run>
+    <Run Id="RAS_axi_timer_0_0_synth_1" Type="Ft3:Synth" SrcSet="RAS_axi_timer_0_0" Part="xczu3eg-sbva484-1-i" ConstrsSet="RAS_axi_timer_0_0" Description="Vivado Synthesis Defaults" AutoIncrementalCheckpoint="false" WriteIncrSynthDcp="false" Dir="$PRUNDIR/RAS_axi_timer_0_0_synth_1" IncludeInArchive="true" IsChild="false" AutoIncrementalDir="$PSRCDIR/utils_1/imports/RAS_axi_timer_0_0_synth_1" AutoRQSDir="$PSRCDIR/utils_1/imports/RAS_axi_timer_0_0_synth_1" ParallelReportGen="true">
+      <Strategy Version="1" Minor="2">
+        <StratHandle Name="Vivado Synthesis Defaults" Flow="Vivado Synthesis 2025">
+          <Desc>Vivado Synthesis Defaults</Desc>
+        </StratHandle>
         <Step Id="synth_design"/>
       </Strategy>
       <GeneratedRun Dir="$PRUNDIR" File="gen_run.xml"/>
@@ -624,7 +682,66 @@
     </Run>
     <Run Id="RAS_accelerator_0_0_impl_1" Type="Ft2:EntireDesign" Part="xczu3eg-sbva484-1-i" ConstrsSet="RAS_accelerator_0_0" Description="Default settings for Implementation." AutoIncrementalCheckpoint="false" WriteIncrSynthDcp="false" SynthRun="RAS_accelerator_0_0_synth_1" IncludeInArchive="false" IsChild="false" GenFullBitstream="true" AutoIncrementalDir="$PSRCDIR/utils_1/imports/RAS_accelerator_0_0_impl_1" AutoRQSDir="$PSRCDIR/utils_1/imports/RAS_accelerator_0_0_impl_1" ParallelReportGen="true">
       <Strategy Version="1" Minor="2">
-        <StratHandle Name="Vivado Implementation Defaults" Flow="Vivado Implementation 2025"/>
+        <StratHandle Name="Vivado Implementation Defaults" Flow="Vivado Implementation 2025">
+          <Desc>Default settings for Implementation.</Desc>
+        </StratHandle>
+        <Step Id="init_design"/>
+        <Step Id="opt_design"/>
+        <Step Id="power_opt_design"/>
+        <Step Id="place_design"/>
+        <Step Id="post_place_power_opt_design"/>
+        <Step Id="phys_opt_design"/>
+        <Step Id="route_design"/>
+        <Step Id="post_route_phys_opt_design"/>
+        <Step Id="write_bitstream"/>
+      </Strategy>
+      <ReportStrategy Name="Vivado Implementation Default Reports" Flow="Vivado Implementation 2025"/>
+      <Report Name="ROUTE_DESIGN.REPORT_METHODOLOGY" Enabled="1"/>
+      <RQSFiles/>
+    </Run>
+    <Run Id="RAS_smartconnect_0_0_impl_1" Type="Ft2:EntireDesign" Part="xczu3eg-sbva484-1-i" ConstrsSet="RAS_smartconnect_0_0" Description="Default settings for Implementation." AutoIncrementalCheckpoint="false" WriteIncrSynthDcp="false" SynthRun="RAS_smartconnect_0_0_synth_1" IncludeInArchive="false" IsChild="false" GenFullBitstream="true" AutoIncrementalDir="$PSRCDIR/utils_1/imports/RAS_smartconnect_0_0_impl_1" AutoRQSDir="$PSRCDIR/utils_1/imports/RAS_smartconnect_0_0_impl_1" ParallelReportGen="true">
+      <Strategy Version="1" Minor="2">
+        <StratHandle Name="Vivado Implementation Defaults" Flow="Vivado Implementation 2025">
+          <Desc>Default settings for Implementation.</Desc>
+        </StratHandle>
+        <Step Id="init_design"/>
+        <Step Id="opt_design"/>
+        <Step Id="power_opt_design"/>
+        <Step Id="place_design"/>
+        <Step Id="post_place_power_opt_design"/>
+        <Step Id="phys_opt_design"/>
+        <Step Id="route_design"/>
+        <Step Id="post_route_phys_opt_design"/>
+        <Step Id="write_bitstream"/>
+      </Strategy>
+      <ReportStrategy Name="Vivado Implementation Default Reports" Flow="Vivado Implementation 2025"/>
+      <Report Name="ROUTE_DESIGN.REPORT_METHODOLOGY" Enabled="1"/>
+      <RQSFiles/>
+    </Run>
+    <Run Id="RAS_axi_perf_mon_0_0_impl_1" Type="Ft2:EntireDesign" Part="xczu3eg-sbva484-1-i" ConstrsSet="RAS_axi_perf_mon_0_0" Description="Default settings for Implementation." AutoIncrementalCheckpoint="false" WriteIncrSynthDcp="false" SynthRun="RAS_axi_perf_mon_0_0_synth_1" IncludeInArchive="false" IsChild="false" GenFullBitstream="true" AutoIncrementalDir="$PSRCDIR/utils_1/imports/RAS_axi_perf_mon_0_0_impl_1" AutoRQSDir="$PSRCDIR/utils_1/imports/RAS_axi_perf_mon_0_0_impl_1" ParallelReportGen="true">
+      <Strategy Version="1" Minor="2">
+        <StratHandle Name="Vivado Implementation Defaults" Flow="Vivado Implementation 2025">
+          <Desc>Default settings for Implementation.</Desc>
+        </StratHandle>
+        <Step Id="init_design"/>
+        <Step Id="opt_design"/>
+        <Step Id="power_opt_design"/>
+        <Step Id="place_design"/>
+        <Step Id="post_place_power_opt_design"/>
+        <Step Id="phys_opt_design"/>
+        <Step Id="route_design"/>
+        <Step Id="post_route_phys_opt_design"/>
+        <Step Id="write_bitstream"/>
+      </Strategy>
+      <ReportStrategy Name="Vivado Implementation Default Reports" Flow="Vivado Implementation 2025"/>
+      <Report Name="ROUTE_DESIGN.REPORT_METHODOLOGY" Enabled="1"/>
+      <RQSFiles/>
+    </Run>
+    <Run Id="RAS_axi_timer_0_0_impl_1" Type="Ft2:EntireDesign" Part="xczu3eg-sbva484-1-i" ConstrsSet="RAS_axi_timer_0_0" Description="Default settings for Implementation." AutoIncrementalCheckpoint="false" WriteIncrSynthDcp="false" SynthRun="RAS_axi_timer_0_0_synth_1" IncludeInArchive="false" IsChild="false" GenFullBitstream="true" AutoIncrementalDir="$PSRCDIR/utils_1/imports/RAS_axi_timer_0_0_impl_1" AutoRQSDir="$PSRCDIR/utils_1/imports/RAS_axi_timer_0_0_impl_1" ParallelReportGen="true">
+      <Strategy Version="1" Minor="2">
+        <StratHandle Name="Vivado Implementation Defaults" Flow="Vivado Implementation 2025">
+          <Desc>Default settings for Implementation.</Desc>
+        </StratHandle>
         <Step Id="init_design"/>
         <Step Id="opt_design"/>
         <Step Id="power_opt_design"/>

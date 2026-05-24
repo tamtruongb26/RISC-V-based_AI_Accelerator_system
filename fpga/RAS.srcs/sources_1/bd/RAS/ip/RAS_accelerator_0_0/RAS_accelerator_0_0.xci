@@ -4,7 +4,7 @@
     "xci_name": "RAS_accelerator_0_0",
     "cell_name": "accelerator_0",
     "component_reference": "user.org:user:accelerator:2.0",
-    "ip_revision": "2",
+    "ip_revision": "3",
     "gen_directory": "../../../../../../RAS.gen/sources_1/bd/RAS/ip/RAS_accelerator_0_0",
     "parameters": {
       "component_parameters": {
@@ -43,7 +43,7 @@
       },
       "runtime_parameters": {
         "IPCONTEXT": [ { "value": "IP_Integrator" } ],
-        "IPREVISION": [ { "value": "2" } ],
+        "IPREVISION": [ { "value": "3" } ],
         "MANAGED": [ { "value": "TRUE" } ],
         "OUTPUTDIR": [ { "value": "../../../../../../RAS.gen/sources_1/bd/RAS/ip/RAS_accelerator_0_0" } ],
         "SELECTEDSIMMODEL": [ { "value": "" } ],
@@ -317,5 +317,5 @@
       }
     }
   },
-  "checksum": "1ae53b69"
+  "checksum": "c9fbf898"
 }
