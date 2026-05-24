@@ -1,18 +1,4 @@
 `timescale 1ns / 1ps
-//////////////////////////////////////////////////////////////////////////////////
-// Module:  post_proc - bias add + activation + saturate
-// Project: accelerator_2_0
-//
-// Spec đầy đủ: hw/accelerator_2_0/hdl/post_proc_spec.md
-//
-// Pipeline 3-stage:
-//   S1: pi_acc_in (Q*.8.22, 40b) + pi_bias (Q1.4.11, 16b)
-//        → truncate → saturate → s1_reg (Q1.8.7, 16b)
-//   S2: 3 path song song (bypass/ReLU register, sigmoid LUT 1-cycle)
-//   S3: MUX activation → saturate Q1.8.7 → po_data_out (Q1.4.11, 16b)
-//
-// Latency: 3 cycle. Throughput: 1 sample/cycle (no stall).
-//////////////////////////////////////////////////////////////////////////////////
 
 module post_proc (
     input  wire         pi_clk,

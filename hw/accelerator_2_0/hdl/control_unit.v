@@ -1,20 +1,4 @@
 `timescale 1ns / 1ps
-//////////////////////////////////////////////////////////////////////////////////
-// Module:  control_unit - accelerator_2_0 FSM lập lịch 1 tile GEMM
-// Project: accelerator_2_0
-//
-// Spec đầy đủ: hw/accelerator_2_0/hdl/control_unit_spec.md
-//
-// 9-state FSM:
-//   IDLE → LOAD_W_RECV ↔ LOAD_W_PULSE → LOAD_BIAS → LOAD_IN
-//        → COMPUTE → POST_PROC → SEND_OUT → DONE → IDLE
-//
-// Số cycle/tile 8×8×8: ~199 = ~2µs @ 100 MHz
-//
-// Word packing AXIS (32-bit):
-//   word[15:0]  = element index chẵn (2*pair + 0)
-//   word[31:16] = element index lẻ   (2*pair + 1)
-//////////////////////////////////////////////////////////////////////////////////
 
 module control_unit #(
     parameter integer SA_N       = 8,
@@ -66,7 +50,21 @@ module control_unit #(
 
     // ── Từ post_proc ─────────────────────────────────────────────
     input  wire [DATA_WIDTH-1:0]         pi_pp_data_out,
-    input  wire                          pi_pp_valid_out
+    input  wire                          pi_pp_valid_out,
+
+    // ── Phase 0 instrumentation: per-state cycle counters ──────────
+    //   pi_cnt_clear = 1 cycle pulse → reset all counters to 0.
+    //   Counters wrap modulo 2^32. Read các po_cnt_* qua AXI-Lite.
+    input  wire                          pi_cnt_clear,
+    output wire [31:0]                   po_cnt_idle,
+    output wire [31:0]                   po_cnt_load_w,
+    output wire [31:0]                   po_cnt_load_b,
+    output wire [31:0]                   po_cnt_load_in,
+    output wire [31:0]                   po_cnt_compute,
+    output wire [31:0]                   po_cnt_post_proc,
+    output wire [31:0]                   po_cnt_send,
+    output wire [31:0]                   po_cnt_done,
+    output wire [31:0]                   po_cnt_total
 );
 
     // ─────────────────────────────────────────────────────────────
@@ -109,6 +107,29 @@ module control_unit #(
     reg [DATA_WIDTH-1:0]  input_buf      [0:SA_N-1][0:SA_N-1];
     reg [ACC_WIDTH-1:0]   psum_buf       [0:SA_N-1][0:SA_N-1];
     reg [DATA_WIDTH-1:0]  out_buf        [0:SA_N-1][0:SA_N-1];
+
+    // ─────────────────────────────────────────────────────────────
+    // Phase 0 instrumentation: per-state cycle counters
+    // ─────────────────────────────────────────────────────────────
+    reg [31:0] cnt_idle;
+    reg [31:0] cnt_load_w;
+    reg [31:0] cnt_load_b;
+    reg [31:0] cnt_load_in;
+    reg [31:0] cnt_compute;
+    reg [31:0] cnt_post_proc;
+    reg [31:0] cnt_send;
+    reg [31:0] cnt_done;
+    reg [31:0] cnt_total;
+
+    assign po_cnt_idle      = cnt_idle;
+    assign po_cnt_load_w    = cnt_load_w;
+    assign po_cnt_load_b    = cnt_load_b;
+    assign po_cnt_load_in   = cnt_load_in;
+    assign po_cnt_compute   = cnt_compute;
+    assign po_cnt_post_proc = cnt_post_proc;
+    assign po_cnt_send      = cnt_send;
+    assign po_cnt_done      = cnt_done;
+    assign po_cnt_total     = cnt_total;
 
     // ─────────────────────────────────────────────────────────────
     // Combinational outputs
@@ -356,6 +377,50 @@ module control_unit #(
 
             default: state <= ST_IDLE;
 
+            endcase
+        end
+    end
+
+    // ─────────────────────────────────────────────────────────────
+    // Phase 0 instrumentation: counter update logic
+    //   Mỗi cycle increment counter của state hiện tại + cnt_total.
+    //   pi_cnt_clear pulse → tất cả counter về 0 (đè reset).
+    //   Counter wrap modulo 2^32 nếu không clear.
+    // ─────────────────────────────────────────────────────────────
+    always @(posedge pi_clk or negedge pi_rst_n) begin : cnt_logic
+        if (!pi_rst_n) begin
+            cnt_idle      <= 32'd0;
+            cnt_load_w    <= 32'd0;
+            cnt_load_b    <= 32'd0;
+            cnt_load_in   <= 32'd0;
+            cnt_compute   <= 32'd0;
+            cnt_post_proc <= 32'd0;
+            cnt_send      <= 32'd0;
+            cnt_done      <= 32'd0;
+            cnt_total     <= 32'd0;
+        end else if (pi_cnt_clear) begin
+            cnt_idle      <= 32'd0;
+            cnt_load_w    <= 32'd0;
+            cnt_load_b    <= 32'd0;
+            cnt_load_in   <= 32'd0;
+            cnt_compute   <= 32'd0;
+            cnt_post_proc <= 32'd0;
+            cnt_send      <= 32'd0;
+            cnt_done      <= 32'd0;
+            cnt_total     <= 32'd0;
+        end else begin
+            cnt_total <= cnt_total + 32'd1;
+            case (state)
+                ST_IDLE:          cnt_idle      <= cnt_idle      + 32'd1;
+                ST_LOAD_W_RECV,
+                ST_LOAD_W_PULSE:  cnt_load_w    <= cnt_load_w    + 32'd1;
+                ST_LOAD_BIAS:     cnt_load_b    <= cnt_load_b    + 32'd1;
+                ST_LOAD_IN:       cnt_load_in   <= cnt_load_in   + 32'd1;
+                ST_COMPUTE:       cnt_compute   <= cnt_compute   + 32'd1;
+                ST_POST_PROC:     cnt_post_proc <= cnt_post_proc + 32'd1;
+                ST_SEND_OUT:      cnt_send      <= cnt_send      + 32'd1;
+                ST_DONE:          cnt_done      <= cnt_done      + 32'd1;
+                default: ;
             endcase
         end
     end

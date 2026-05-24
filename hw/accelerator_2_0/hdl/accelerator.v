@@ -1,21 +1,4 @@
 `timescale 1ns / 1ps
-//////////////////////////////////////////////////////////////////////////////////
-// Module:  accelerator (top wrapper)
-// Project: accelerator_2_0
-//
-// Hợp nhất 7 module:
-//   - data_path           (8x8 systolic, TPU canonical)
-//   - control_unit        (FSM 9-state)
-//   - post_proc           (3-stage pipeline, instance sigmoid_lookup bên trong)
-//   - 3 AXI shim          (Lite + Stream slave + Stream master)
-//
-// 3 nhóm AXI ports:
-//   - s00_axi_*    (AXI-Lite slave, address map ở axi_shim_spec.md §2.2)
-//   - s00_axis_*   (AXI-Stream slave, data DMA → accelerator)
-//   - m00_axis_*   (AXI-Stream master, data accelerator → DMA)
-//
-// Tất cả 3 nhóm dùng chung 1 clock domain (axi_aclk).
-//////////////////////////////////////////////////////////////////////////////////
 
 module accelerator #(
     parameter integer SA_N                 = 8,
@@ -78,11 +61,40 @@ module accelerator #(
     // Internal wires (shim ↔ control_unit ↔ data_path ↔ post_proc)
     // ═══════════════════════════════════════════════════════════
 
-    // ── AXI-Lite shim → control_unit config ──
-    wire [9:0] tile_m_size, tile_k_size, tile_n_size;
+    // ── AXI-Lite shim → control_unit config (Phase 0: packed → unpack) ──
+    wire [3:0] tile_m_4, tile_k_4, tile_n_4;
+    wire [9:0] tile_m_size = {6'd0, tile_m_4};
+    wire [9:0] tile_k_size = {6'd0, tile_k_4};
+    wire [9:0] tile_n_size = {6'd0, tile_n_4};
     wire [1:0] act_mode;
     wire       start;
     wire       busy, done;
+
+    // ── Phase 0 instrumentation: counter control + readback ──
+    wire        cnt_clear;
+    wire [3:0]  cnt_sel;
+    wire [31:0] cnt_idle, cnt_load_w, cnt_load_b, cnt_load_in;
+    wire [31:0] cnt_compute, cnt_post_proc, cnt_send, cnt_done;
+    wire [31:0] cnt_total, cnt_pe_active;
+    reg  [31:0] cnt_val_mux;
+
+    // 10-to-1 counter mux - chọn counter dựa vào cnt_sel.
+    // Index map khớp với mô tả trong slave_lite.
+    always @(*) begin
+        case (cnt_sel)
+            4'd0:  cnt_val_mux = cnt_idle;
+            4'd1:  cnt_val_mux = cnt_load_w;
+            4'd2:  cnt_val_mux = cnt_load_b;
+            4'd3:  cnt_val_mux = cnt_load_in;
+            4'd4:  cnt_val_mux = cnt_compute;
+            4'd5:  cnt_val_mux = cnt_post_proc;
+            4'd6:  cnt_val_mux = cnt_send;
+            4'd7:  cnt_val_mux = cnt_done;
+            4'd8:  cnt_val_mux = cnt_total;
+            4'd9:  cnt_val_mux = cnt_pe_active;
+            default: cnt_val_mux = 32'd0;
+        endcase
+    end
 
     // ── AXIS slave shim → control_unit ──
     wire [31:0] stream_data;
@@ -120,13 +132,16 @@ module accelerator #(
         .C_S_AXI_DATA_WIDTH (C_S00_AXI_DATA_WIDTH),
         .C_S_AXI_ADDR_WIDTH (C_S00_AXI_ADDR_WIDTH)
     ) u_axi_lite (
-        .po_tile_m_size  (tile_m_size),
-        .po_tile_k_size  (tile_k_size),
-        .po_tile_n_size  (tile_n_size),
+        .po_tile_m_size  (tile_m_4),
+        .po_tile_k_size  (tile_k_4),
+        .po_tile_n_size  (tile_n_4),
         .po_start        (start),
         .po_act_mode     (act_mode),
+        .po_cnt_clear    (cnt_clear),
+        .po_cnt_sel      (cnt_sel),
         .pi_busy         (busy),
         .pi_done         (done),
+        .pi_cnt_val      (cnt_val_mux),
         .S_AXI_ACLK      (s00_axi_aclk),
         .S_AXI_ARESETN   (s00_axi_aresetn),
         .S_AXI_AWADDR    (s00_axi_awaddr),
@@ -225,7 +240,18 @@ module accelerator #(
         .po_pp_valid_in       (pp_valid_in),
         .po_pp_act_mode       (pp_act_mode),
         .pi_pp_data_out       (pp_data_out),
-        .pi_pp_valid_out      (pp_valid_out)
+        .pi_pp_valid_out      (pp_valid_out),
+        // Phase 0 instrumentation
+        .pi_cnt_clear         (cnt_clear),
+        .po_cnt_idle          (cnt_idle),
+        .po_cnt_load_w        (cnt_load_w),
+        .po_cnt_load_b        (cnt_load_b),
+        .po_cnt_load_in       (cnt_load_in),
+        .po_cnt_compute       (cnt_compute),
+        .po_cnt_post_proc     (cnt_post_proc),
+        .po_cnt_send          (cnt_send),
+        .po_cnt_done          (cnt_done),
+        .po_cnt_total         (cnt_total)
     );
 
     // ═══════════════════════════════════════════════════════════
@@ -244,7 +270,10 @@ module accelerator #(
         .pi_a_left          (dp_a_left),
         .pi_valid_left      (dp_valid_left),
         .po_psum_bottom     (dp_psum_bottom),
-        .po_valid_bottom    (dp_valid_bottom)
+        .po_valid_bottom    (dp_valid_bottom),
+        // Phase 0 instrumentation
+        .pi_cnt_clear       (cnt_clear),
+        .po_cnt_pe_active   (cnt_pe_active)
     );
 
     // ═══════════════════════════════════════════════════════════

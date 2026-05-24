@@ -3,17 +3,21 @@
 // Module:  accelerator_slave_lite_v2_0_S00_AXI
 // Project: accelerator_2_0
 //
-// AXI4-Lite slave register file (5 regs).
+// AXI4-Lite slave register file (5 regs, post-Phase 0).
 // Spec đầy đủ: hw/accelerator_2_0/hdl/axi_shim_spec.md §2.
 //
-// Address map:
-//   0x00 TILE_M_SIZE  R/W  [9:0]   M dim (1..8)
-//   0x04 TILE_K_SIZE  R/W  [9:0]   K dim
-//   0x08 TILE_N_SIZE  R/W  [9:0]   N dim
-//   0x0C CONTROL      R/W  [0]=START (one-shot), [2:1]=ACT_MODE
-//   0x10 STATUS       R    [0]=BUSY, [1]=DONE  (HW-written)
+// Address map (Phase 0 - packed config + indirect counter readback):
+//   0x00 CONFIG_PACKED  R/W  [3:0]=M, [7:4]=K, [11:8]=N, [13:12]=ACT, [14]=START
+//                            START là one-shot pulse (auto-clear sau 1 cycle).
+//   0x04 CNT_CLEAR      R/W  [0]=PULSE (auto-clear) - reset toàn bộ counter
+//   0x08 CNT_SEL        R/W  [3:0]=counter index (xem mapping ở accelerator.v)
+//   0x0C STATUS         R    [0]=BUSY, [1]=DONE  (HW-written, DONE sticky)
+//   0x10 CNT_VAL        R    32-bit value của counter[cnt_sel]  (HW mux)
 //
-// START auto-clear: bit[0] tự về 0 sau 1 cycle để thành pulse.
+// Counter index mapping (xem accelerator.v cho mux logic):
+//   0 = cnt_idle       1 = cnt_load_w     2 = cnt_load_b     3 = cnt_load_in
+//   4 = cnt_compute    5 = cnt_post_proc  6 = cnt_send       7 = cnt_done
+//   8 = cnt_total      9 = cnt_pe_active  10..15 = reserved (returns 0)
 //////////////////////////////////////////////////////////////////////////////////
 
 module accelerator_slave_lite_v2_0_S00_AXI #(
@@ -21,14 +25,17 @@ module accelerator_slave_lite_v2_0_S00_AXI #(
     parameter integer C_S_AXI_ADDR_WIDTH = 5
 )(
     // ── User-side outputs (tới control_unit) ──
-    output wire [9:0]   po_tile_m_size,
-    output wire [9:0]   po_tile_k_size,
-    output wire [9:0]   po_tile_n_size,
+    output wire [3:0]   po_tile_m_size,
+    output wire [3:0]   po_tile_k_size,
+    output wire [3:0]   po_tile_n_size,
     output wire         po_start,
     output wire [1:0]   po_act_mode,
-    // ── User-side inputs (từ control_unit) ──
+    output wire         po_cnt_clear,
+    output wire [3:0]   po_cnt_sel,
+    // ── User-side inputs (từ control_unit/data_path) ──
     input  wire         pi_busy,
     input  wire         pi_done,
+    input  wire [31:0]  pi_cnt_val,
 
     // ── AXI4-Lite slave ──
     input  wire                                S_AXI_ACLK,
@@ -71,15 +78,20 @@ module accelerator_slave_lite_v2_0_S00_AXI #(
     localparam integer OPT_MEM_ADDR_BITS = 2;   // 3-bit register select (covers 5 regs)
 
     // ─────────────────────────────────────────────────────────
-    // Registers
+    // Registers (Phase 0 layout)
+    //   slv_reg0 = CONFIG_PACKED (R/W) - M/K/N/ACT/START
+    //   slv_reg1 = CNT_CLEAR     (R/W) - bit[0] one-shot pulse
+    //   slv_reg2 = CNT_SEL       (R/W) - bit[3:0] counter index
+    //   slv_reg3 = STATUS        (R, HW assembled từ pi_busy + done_sticky)
+    //   slv_reg4 = CNT_VAL       (R, HW from pi_cnt_val mux ngoài slave_lite)
     // ─────────────────────────────────────────────────────────
-    reg [C_S_AXI_DATA_WIDTH-1:0] slv_reg0;  // TILE_M_SIZE
-    reg [C_S_AXI_DATA_WIDTH-1:0] slv_reg1;  // TILE_K_SIZE
-    reg [C_S_AXI_DATA_WIDTH-1:0] slv_reg2;  // TILE_N_SIZE
-    reg [C_S_AXI_DATA_WIDTH-1:0] slv_reg3;  // CONTROL
+    reg [C_S_AXI_DATA_WIDTH-1:0] slv_reg0;  // CONFIG_PACKED
+    reg [C_S_AXI_DATA_WIDTH-1:0] slv_reg1;  // CNT_CLEAR
+    reg [C_S_AXI_DATA_WIDTH-1:0] slv_reg2;  // CNT_SEL
     // DONE sticky: latch on pi_done pulse, clear on next START write
     reg                          done_sticky;
-    wire [C_S_AXI_DATA_WIDTH-1:0] slv_reg4 = {30'd0, done_sticky, pi_busy};  // STATUS (HW)
+    wire [C_S_AXI_DATA_WIDTH-1:0] slv_reg3 = {30'd0, done_sticky, pi_busy};  // STATUS (HW)
+    wire [C_S_AXI_DATA_WIDTH-1:0] slv_reg4 = pi_cnt_val;                     // CNT_VAL (HW mux)
 
     integer byte_index;
 
@@ -149,17 +161,20 @@ module accelerator_slave_lite_v2_0_S00_AXI #(
     end
 
     // ─────────────────────────────────────────────────────────
-    // Register write + START auto-clear
+    // Register write + START/CNT_CLEAR auto-clear
+    //   slv_reg0[14] (START) và slv_reg1[0] (CNT_CLEAR_PULSE) là one-shot:
+    //   sau khi user ghi 1, HW tự đặt về 0 vào cycle kế tiếp.
     // ─────────────────────────────────────────────────────────
     always @(posedge S_AXI_ACLK) begin
         if (!S_AXI_ARESETN) begin
             slv_reg0 <= {C_S_AXI_DATA_WIDTH{1'b0}};
             slv_reg1 <= {C_S_AXI_DATA_WIDTH{1'b0}};
             slv_reg2 <= {C_S_AXI_DATA_WIDTH{1'b0}};
-            slv_reg3 <= {C_S_AXI_DATA_WIDTH{1'b0}};
         end else begin
-            // Auto-clear START bit (one-shot pulse)
-            if (slv_reg3[0]) slv_reg3[0] <= 1'b0;
+            // Auto-clear START bit (one-shot pulse) - slv_reg0[14]
+            if (slv_reg0[14]) slv_reg0[14] <= 1'b0;
+            // Auto-clear CNT_CLEAR pulse - slv_reg1[0]
+            if (slv_reg1[0]) slv_reg1[0] <= 1'b0;
 
             if (S_AXI_WVALID) begin
                 case (S_AXI_AWVALID ?
@@ -174,10 +189,7 @@ module accelerator_slave_lite_v2_0_S00_AXI #(
                     3'h2: for (byte_index = 0; byte_index < 4; byte_index = byte_index + 1)
                               if (S_AXI_WSTRB[byte_index])
                                   slv_reg2[byte_index*8 +: 8] <= S_AXI_WDATA[byte_index*8 +: 8];
-                    3'h3: for (byte_index = 0; byte_index < 4; byte_index = byte_index + 1)
-                              if (S_AXI_WSTRB[byte_index])
-                                  slv_reg3[byte_index*8 +: 8] <= S_AXI_WDATA[byte_index*8 +: 8];
-                    // 3'h4 = STATUS read-only, ignore writes
+                    // 3'h3 = STATUS read-only, 3'h4 = CNT_VAL read-only
                     default: ;
                 endcase
             end
@@ -186,11 +198,12 @@ module accelerator_slave_lite_v2_0_S00_AXI #(
 
     // ─────────────────────────────────────────────────────────
     // DONE sticky logic: latch khi pi_done pulse, clear khi START write
+    //   START giờ ở slv_reg0[14] (CONFIG_PACKED).
     // ─────────────────────────────────────────────────────────
     always @(posedge S_AXI_ACLK) begin
         if (!S_AXI_ARESETN) begin
             done_sticky <= 1'b0;
-        end else if (slv_reg3[0]) begin
+        end else if (slv_reg0[14]) begin
             // START vừa được ghi (1 cycle trước auto-clear) → reset DONE
             done_sticky <= 1'b0;
         end else if (pi_done) begin
@@ -243,12 +256,19 @@ module accelerator_slave_lite_v2_0_S00_AXI #(
         {C_S_AXI_DATA_WIDTH{1'b0}};
 
     // ─────────────────────────────────────────────────────────
-    // User-side outputs (truncate 32→10 bit cho tile sizes)
+    // User-side outputs - unpack CONFIG_PACKED + counter control
+    //   slv_reg0[3:0]  = M_size   (1..8)
+    //   slv_reg0[7:4]  = K_size
+    //   slv_reg0[11:8] = N_size
+    //   slv_reg0[13:12] = ACT_MODE
+    //   slv_reg0[14]   = START_pulse
     // ─────────────────────────────────────────────────────────
-    assign po_tile_m_size = slv_reg0[9:0];
-    assign po_tile_k_size = slv_reg1[9:0];
-    assign po_tile_n_size = slv_reg2[9:0];
-    assign po_start       = slv_reg3[0];
-    assign po_act_mode    = slv_reg3[2:1];
+    assign po_tile_m_size = slv_reg0[3:0];
+    assign po_tile_k_size = slv_reg0[7:4];
+    assign po_tile_n_size = slv_reg0[11:8];
+    assign po_act_mode    = slv_reg0[13:12];
+    assign po_start       = slv_reg0[14];
+    assign po_cnt_clear   = slv_reg1[0];
+    assign po_cnt_sel     = slv_reg2[3:0];
 
 endmodule

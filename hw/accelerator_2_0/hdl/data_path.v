@@ -1,40 +1,4 @@
 `timescale 1ns / 1ps
-//////////////////////////////////////////////////////////////////////////////////
-// Module:  data_path - SA_N × SA_N TPU-like Weight-Stationary Systolic Array
-// Project: accelerator_2_0
-//
-// ============================================================================
-// REWRITE từ phiên bản BROADCAST (fpga/Accelerator_v2_tb.srcs/sources_1/new/data_path.v)
-// → TPU CANONICAL.
-//
-// Cái GIỮ NGUYÊN:
-//   - SA_N × SA_N grid sinh bằng `genvar`.
-//   - Weight nạp 1 hàng PE / cycle (broadcast `pi_weight_data` 1→N theo cột,
-//     gate bằng `pi_weight_row_sel == r`).
-//   - Top edge mỗi cột nối psum=0 (input của PE(0,c)).
-//   - Output lấy từ bottom row mỗi cột.
-//
-// Cái ĐỔI để thành TPU systolic (a chảy ngang):
-//   1. THAY broadcast `pi_a_row_data[r]` → mọi cột row r,
-//      bằng HORIZONTAL CHAIN: chỉ PE(r,0) nhận từ port `pi_a_left[r]`,
-//      các PE còn lại lấy từ PE bên trái: PE(r,c).pi_a_in = PE(r,c-1).po_a_out.
-//      → Internal wire 2D `a_h[r][c]` cho a-bus chiều ngang (size N+1 mỗi row,
-//      cột 0 là từ port ngoài, cột 1..N là output của PE(r, 0..N-1)).
-//   2. ĐỔI `pi_a_row_valid` → `pi_valid_left`, cũng chỉ vào cột 0,
-//      sau đó propagate ngang: `valid_h[r][c+1] = PE(r,c).po_valid_out`.
-//      Bỏ vertical valid chain `acc_valid_v` (TPU không cần - psum luôn pipeline,
-//      validity được đánh dấu bởi `valid_h[r][c]` đi cùng activation).
-//   3. ĐỔI tên port output: po_result_data/_valid → po_psum_bottom/po_valid_bottom.
-//   4. ĐỔI tên port input: pi_a_row_data/_valid → pi_a_left/pi_valid_left.
-//
-// Geometry & timing (xem firmware skewed feed trong control_unit.v):
-//   - PE(r, c) nắm W[r][c] (r = K-axis, c = N-axis).
-//   - Tại cycle t, pi_a_left[r] = A[t-r][r] khi 0 ≤ t-r < M (skewed by r).
-//   - C[m][n] xuất hiện tại psum_v[K][n] khi cmp_t = m + n + K.
-//   - po_valid_bottom[n] high tại đúng cycle đó (đi cùng po_psum_bottom).
-//
-// Latency 1 tile M×K×N: M+N+K-1 cycle (sau pipeline fill, throughput 1 row/cycle).
-//////////////////////////////////////////////////////////////////////////////////
 
 module data_path #(
     parameter integer SA_N          = 8,
@@ -61,7 +25,16 @@ module data_path #(
     //   po_psum_bottom[n] = psum 40-bit của cột n (PE(K-1, n).po_psum_out registered).
     //   po_valid_bottom[n] high khi po_psum_bottom[n] = C[m][n] cho m nào đó.
     output wire [SA_N*ACC_WIDTH-1:0]      po_psum_bottom,
-    output wire [SA_N-1:0]                po_valid_bottom
+    output wire [SA_N-1:0]                po_valid_bottom,
+
+    // ── Phase 0 instrumentation: PE-active cycle counter ───────────
+    //   Mỗi cycle có ≥1 hàng input (pi_a_left[r] ≠ 0 AND pi_valid_left[r])
+    //   → cnt_pe_active += 1. Dùng làm baseline cho phân tích sparsity
+    //   (Phase 4) - sau khi bật zero-skip, counter này sẽ giảm theo
+    //   tỉ lệ thưa của activation.
+    //   pi_cnt_clear = 1 cycle pulse → clear về 0.
+    input  wire                           pi_cnt_clear,
+    output wire [31:0]                    po_cnt_pe_active
 );
     // ---------------------------------------------------------------------
     //   a_h[r][0]   = pi_a_left[r]                  (từ port ngoài)
@@ -144,5 +117,39 @@ module data_path #(
             assign po_valid_bottom[oc] = valid_h[SA_N-1][oc+1];
         end
     endgenerate
+
+    // ---------------------------------------------------------------------
+    // Phase 0 instrumentation: PE-active cycle counter
+    //   active_row[r] = pi_valid_left[r] AND (pi_a_left[r] != 0)
+    //   any_active    = |active_row → cycle này có ≥1 PE đang nhận
+    //                   activation hữu ích (non-zero).
+    //
+    // Trước sparsity skip (Phase 4): kỳ vọng counter ≈ cnt_compute (vì
+    // valid_left[r]=1 mọi cycle COMPUTE và đa số activation non-zero).
+    // Sau sparsity skip + ReLU: counter sẽ giảm theo tỉ lệ thưa.
+    // ---------------------------------------------------------------------
+    reg [31:0] cnt_pe_active;
+    assign po_cnt_pe_active = cnt_pe_active;
+
+    wire [SA_N-1:0] active_row;
+    genvar ar;
+    generate
+        for (ar = 0; ar < SA_N; ar = ar + 1) begin : gen_active
+            assign active_row[ar] = pi_valid_left[ar] &&
+                                    (pi_a_left[ar*DATA_WIDTH +: DATA_WIDTH] !=
+                                     {DATA_WIDTH{1'b0}});
+        end
+    endgenerate
+
+    wire any_active = |active_row;
+
+    always @(posedge pi_clk or negedge pi_rst_n) begin : pe_active_cnt
+        if (!pi_rst_n)
+            cnt_pe_active <= 32'd0;
+        else if (pi_cnt_clear)
+            cnt_pe_active <= 32'd0;
+        else if (any_active)
+            cnt_pe_active <= cnt_pe_active + 32'd1;
+    end
 
 endmodule
