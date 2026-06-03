@@ -28,4 +28,13 @@ static inline void fence_iorw(void)
     __asm__ volatile ("nop" ::: "memory");
 }
 
+/* PicoRV32 cycle counter (CSR rdcycle, lower 32 bits).
+ * Wraps every ~43 seconds at 100 MHz — đủ cho 1 LeNet inference. */
+static inline uint32_t pico_rdcycle(void)
+{
+    uint32_t cycles;
+    __asm__ volatile ("rdcycle %0" : "=r"(cycles));
+    return cycles;
+}
+
 #endif /* RAAS_IO_H */

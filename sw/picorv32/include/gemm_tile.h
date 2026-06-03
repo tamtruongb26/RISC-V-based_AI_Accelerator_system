@@ -25,7 +25,7 @@
  *   b_addr     DDR address of bias   B[N], Q1.4.11 (0 = no bias)
  *   c_addr     DDR address of output C[M × N], row-major Q1.4.11
  *   M, K, N    Matrix dimensions (can be any positive value, not limited to 8)
- *   act_mode   RAAS_CTRL_ACT_BYPASS, RAAS_CTRL_ACT_RELU, etc.
+ *   act_mode   RAAS_CFG_ACT_BYPASS, RAAS_CFG_ACT_RELU, etc.
  *
  * Returns: 0 on success, negative on DMA/accelerator error.
  */

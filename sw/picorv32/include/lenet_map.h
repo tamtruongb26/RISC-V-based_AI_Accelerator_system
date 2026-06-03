@@ -103,6 +103,24 @@
 #define LENET_DDR_HW_CYCLES_OFF   0x0004000Cu  /* 4B hardware cycles */
 #define LENET_DDR_SW_CYCLES_OFF   0x00040010u  /* 4B software cycles */
 
+/* --- Phase 0 instrumentation: per-layer + accelerator counter snapshots ---
+ *
+ * LAYER_CYC[i] = Pico rdcycle taken right after layer i completes.
+ *   i=0  → start of inference (immediately after accel_counters_clear)
+ *   i=1  → after Conv1     i=2 → after Pool1
+ *   i=3  → after Conv2     i=4 → after Pool2
+ *   i=5  → after FC1       i=6 → after FC2
+ *   i=7  → after FC3       i=8 → after argmax
+ * Tổng 9 × 4B = 36B. Delta giữa các slot = cycle count của layer đó.
+ *
+ * ACCEL_CNT = accel_counters_t snapshot tại cuối inference (40B).
+ * Layout = (idle, load_w, load_b, load_in, compute, post_proc, send, done,
+ *          total, pe_active) — 10 × 4B. Tổng accelerator behavior breakdown.
+ */
+#define LENET_DDR_LAYER_CYC_OFF   0x00040020u  /* 9 × 4B = 36B */
+#define LENET_DDR_ACCEL_CNT_OFF   0x00040050u  /* 10 × 4B = 40B */
+#define LENET_DDR_INSTR_END_OFF   0x00040080u  /* end of instrumentation block */
+
 /* Convenience: absolute Pico-view addresses */
 #define LENET_ADDR(off)  (RAAS_PICO_DDR_BASE + (off))
 

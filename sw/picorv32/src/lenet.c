@@ -29,6 +29,7 @@
 #include "pool.h"
 #include "io.h"
 #include "mailbox.h"
+#include "accel.h"  /* Phase 0: accel_counters_clear/snapshot */
 
 /* ── Helper: read/write Q1.4.11 from DDR ───────────────────────────── */
 static inline int16_t rd16(uint32_t addr)
@@ -70,6 +71,18 @@ static void hwc_to_chw(uint32_t src_addr, uint32_t dst_addr,
 /* Debug mailbox checkpoint */
 #define LDBG(layer)  mmio_write32(LENET_ADDR(LENET_DDR_LAYER_DBG_OFF), (layer))
 
+/* Phase 0 instrumentation: stamp Pico cycle counter vào LAYER_CYC[idx].
+ * Chỉ ghi khi g_instr_enabled = 1 (tức use_hw run). */
+static int g_instr_enabled;
+
+static inline void lstamp(uint32_t idx)
+{
+    if (g_instr_enabled) {
+        mmio_write32(LENET_ADDR(LENET_DDR_LAYER_CYC_OFF) + idx * 4u,
+                     pico_rdcycle());
+    }
+}
+
 int lenet5_infer(int use_hw)
 {
     /* Shorthand addresses */
@@ -79,6 +92,14 @@ int lenet5_infer(int use_hw)
     uint32_t fmap_b  = LENET_ADDR(LENET_DDR_FMAP_B_OFF);
 
     int rc;
+
+    /* Phase 0: bật instrumentation chỉ cho HW run.
+     * SW run skipping → bảo toàn LAYER_CYC + ACCEL_CNT của HW run. */
+    g_instr_enabled = use_hw;
+    if (g_instr_enabled) {
+        accel_counters_clear();
+    }
+    lstamp(0);  /* baseline: cycles tại điểm bắt đầu inference */
 
     /* ── Layer 1: Conv1 ──────────────────────────────────────────────
      * im2col(image 1×28×28, k=5) → IM2COL_BUF [576×25]
@@ -95,13 +116,14 @@ int lenet5_infer(int use_hw)
                LENET_ADDR(LENET_DDR_CONV1_BIAS_OFF),
                fmap_a,  /* temp: HWC layout */
                LENET_CONV1_GEMM_M, LENET_CONV1_GEMM_K, LENET_CONV1_GEMM_N,
-               RAAS_CTRL_ACT_RELU);
+               RAAS_CFG_ACT_RELU);
     if (rc < 0) return rc;
 
     /* Transpose HWC → CHW for pooling */
     hwc_to_chw(fmap_a, fmap_b,
                LENET_CONV1_H_OUT, LENET_CONV1_W_OUT, LENET_CONV1_C_OUT);
 
+    lstamp(1);  /* Conv1 + transpose done */
     /* ── Layer 2: Pool1 ──────────────────────────────────────────────
      * maxpool2x2(FMAP_B [6×24×24]) → FMAP_A [6×12×12]
      * ──────────────────────────────────────────────────────────────── */
@@ -109,6 +131,7 @@ int lenet5_infer(int use_hw)
     maxpool2x2(fmap_b, fmap_a,
                LENET_POOL1_C, LENET_POOL1_H_IN, LENET_POOL1_W_IN);
 
+    lstamp(2);  /* Pool1 done */
     /* ── Layer 3: Conv2 ──────────────────────────────────────────────
      * im2col(FMAP_A [6×12×12], k=5) → IM2COL_BUF [64×150]
      * GEMM(64×150 × 150×16) + bias + ReLU → FMAP_B (temporary HWC)
@@ -124,12 +147,13 @@ int lenet5_infer(int use_hw)
                LENET_ADDR(LENET_DDR_CONV2_BIAS_OFF),
                fmap_b,  /* temp: HWC layout */
                LENET_CONV2_GEMM_M, LENET_CONV2_GEMM_K, LENET_CONV2_GEMM_N,
-               RAAS_CTRL_ACT_RELU);
+               RAAS_CFG_ACT_RELU);
     if (rc < 0) return rc;
 
     hwc_to_chw(fmap_b, fmap_a,
                LENET_CONV2_H_OUT, LENET_CONV2_W_OUT, LENET_CONV2_C_OUT);
 
+    lstamp(3);  /* Conv2 + transpose done */
     /* ── Layer 4: Pool2 ──────────────────────────────────────────────
      * maxpool2x2(FMAP_A [16×8×8]) → FMAP_B [16×4×4] = 256 elements
      * After this, data is already "flat" for FC layers (CHW → vector).
@@ -138,6 +162,7 @@ int lenet5_infer(int use_hw)
     maxpool2x2(fmap_a, fmap_b,
                LENET_POOL2_C, LENET_POOL2_H_IN, LENET_POOL2_W_IN);
 
+    lstamp(4);  /* Pool2 done */
     /* ── Layer 5: FC1 ────────────────────────────────────────────────
      * GEMM(1×256 × 256×120) + bias + ReLU
      * FMAP_B [256] → FMAP_A [120]
@@ -148,9 +173,10 @@ int lenet5_infer(int use_hw)
                LENET_ADDR(LENET_DDR_FC1_BIAS_OFF),
                fmap_a,
                1u, LENET_FC1_IN, LENET_FC1_OUT,
-               RAAS_CTRL_ACT_RELU);
+               RAAS_CFG_ACT_RELU);
     if (rc < 0) return rc;
 
+    lstamp(5);  /* FC1 done */
     /* ── Layer 6: FC2 ────────────────────────────────────────────────
      * GEMM(1×120 × 120×84) + bias + ReLU
      * FMAP_A [120] → FMAP_B [84]
@@ -161,9 +187,10 @@ int lenet5_infer(int use_hw)
                LENET_ADDR(LENET_DDR_FC2_BIAS_OFF),
                fmap_b,
                1u, LENET_FC2_IN, LENET_FC2_OUT,
-               RAAS_CTRL_ACT_RELU);
+               RAAS_CFG_ACT_RELU);
     if (rc < 0) return rc;
 
+    lstamp(6);  /* FC2 done */
     /* ── Layer 7: FC3 ────────────────────────────────────────────────
      * GEMM(1×84 × 84×10) + bias + ReLU
      * FMAP_B [84] → FMAP_A [10]
@@ -174,9 +201,10 @@ int lenet5_infer(int use_hw)
                LENET_ADDR(LENET_DDR_FC3_BIAS_OFF),
                fmap_a,
                1u, LENET_FC3_IN, LENET_FC3_OUT,
-               RAAS_CTRL_ACT_RELU);
+               RAAS_CFG_ACT_RELU);
     if (rc < 0) return rc;
 
+    lstamp(7);  /* FC3 done */
     /* ── Argmax ──────────────────────────────────────────────────────
      * Find index of maximum value in FMAP_A[10]
      * ──────────────────────────────────────────────────────────────── */
@@ -189,6 +217,25 @@ int lenet5_infer(int use_hw)
             max_val = v;
             predicted = (int)i;
         }
+    }
+
+    lstamp(8);  /* Argmax done — end of inference */
+
+    /* Phase 0: snapshot accelerator counters vào DDR (10 × 4B layout). */
+    if (g_instr_enabled) {
+        accel_counters_t cnt;
+        accel_counters_snapshot(&cnt);
+        uint32_t base = LENET_ADDR(LENET_DDR_ACCEL_CNT_OFF);
+        mmio_write32(base + 0u,  cnt.idle);
+        mmio_write32(base + 4u,  cnt.load_w);
+        mmio_write32(base + 8u,  cnt.load_b);
+        mmio_write32(base + 12u, cnt.load_in);
+        mmio_write32(base + 16u, cnt.compute);
+        mmio_write32(base + 20u, cnt.post_proc);
+        mmio_write32(base + 24u, cnt.send);
+        mmio_write32(base + 28u, cnt.done);
+        mmio_write32(base + 32u, cnt.total);
+        mmio_write32(base + 36u, cnt.pe_active);
     }
 
     return predicted;

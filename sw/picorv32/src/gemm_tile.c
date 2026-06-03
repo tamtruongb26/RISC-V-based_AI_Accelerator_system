@@ -148,7 +148,7 @@ int gemm_tiled(uint32_t a_addr, uint32_t w_addr, uint32_t b_addr,
                 dma_reset();
 
                 /* 5. Configure accelerator */
-                accel_configure(SA, SA, SA, RAAS_CTRL_ACT_BYPASS);
+                accel_configure(SA, SA, SA, RAAS_CFG_ACT_BYPASS);
                 accel_start();
 
                 /* 6. Arm S2MM to receive output */
@@ -216,7 +216,7 @@ int gemm_tiled(uint32_t a_addr, uint32_t w_addr, uint32_t b_addr,
                     if (val < -32768) val = -32768;
 
                     /* Activation */
-                    if (act_mode == RAAS_CTRL_ACT_RELU && val < 0)
+                    if (act_mode == RAAS_CFG_ACT_RELU && val < 0)
                         val = 0;
 
                     ddr_write16(c_addr + co, (int16_t)val);
@@ -253,7 +253,7 @@ int gemm_sw(uint32_t a_addr, uint32_t w_addr, uint32_t b_addr,
             if (acc > 32767) acc = 32767;
             if (acc < -32768) acc = -32768;
             
-            if (act_mode == RAAS_CTRL_ACT_RELU && acc < 0) {
+            if (act_mode == RAAS_CFG_ACT_RELU && acc < 0) {
                 acc = 0;
             }
             

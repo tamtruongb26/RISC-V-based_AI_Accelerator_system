@@ -20,11 +20,8 @@
 #include "mailbox.h"
 #include "io.h"
 
-static inline uint32_t get_cycles(void) {
-    uint32_t cycles;
-    __asm__ volatile ("rdcycle %0" : "=r"(cycles));
-    return cycles;
-}
+/* get_cycles → io.h::pico_rdcycle() (Phase 0 refactor) */
+#define get_cycles pico_rdcycle
 
 int main(void)
 {

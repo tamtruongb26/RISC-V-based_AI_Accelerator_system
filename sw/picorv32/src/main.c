@@ -60,7 +60,7 @@ int main(void)
 
     /* ── Step 4: configure + start accelerator ───────────────────────── */
     accel_configure(RAAS_TILE_M, RAAS_TILE_K, RAAS_TILE_N,
-                    RAAS_CTRL_ACT_BYPASS);
+                    RAAS_CFG_ACT_BYPASS);
     DBG(0x05);                               /* accel_configure() returned  */
     accel_start();
     DBG(0x06);                               /* accel_start() returned      */

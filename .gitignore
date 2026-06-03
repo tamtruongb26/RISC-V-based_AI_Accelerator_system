@@ -40,6 +40,8 @@ xsim.dir/
 sim_build/
 *.dir/
 sim/xsim/
+# Project Vivado simulation đặt trong hw/ (cache, .xpr, log tự sinh)
+hw/**/sim_projects/
 
 # Build artifacts (centralized outputs)
 build/

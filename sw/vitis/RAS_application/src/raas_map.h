@@ -1,11 +1,3 @@
-/******************************************************************************
- * raas_map.h — RAAS shared memory map + register definitions
- *
- * Shared between PicoRV32 firmware (sw/picorv32/) và PS app (sw/vitis/).
- *
- * Hardware ref: hw/accelerator_2_0/hdl/, fpga/RAS.bd address map.
- * Plan ref:     §8.1 (Step 14.1) trong plan file.
- ******************************************************************************/
 #ifndef RAAS_MAP_H
 #define RAAS_MAP_H
 
@@ -34,25 +26,63 @@
 #define RAAS_SW_RESET_HOLD       0x0u
 
 /* ============================================================================
- * Accelerator register offsets (relative to ACCEL_BASE)
+ * Accelerator register offsets (Phase 0 layout)
+ *
+ * Old 5-register layout (TILE_M/K/N/CTRL/STATUS) đã được pack lại để giảm
+ * MMIO overhead: 1 write thay 4. Thêm 2 register cho counter readback indirect.
  * ============================================================================ */
 
-#define RAAS_ACCEL_TILE_M        0x00u   /* R/W [9:0] M dimension (1..8) */
-#define RAAS_ACCEL_TILE_K        0x04u   /* R/W [9:0]                    */
-#define RAAS_ACCEL_TILE_N        0x08u   /* R/W [9:0]                    */
-#define RAAS_ACCEL_CTRL          0x0Cu   /* R/W [0]=START, [2:1]=ACT     */
-#define RAAS_ACCEL_STATUS        0x10u   /* R   [0]=BUSY, [1]=DONE       */
+#define RAAS_ACCEL_CFG           0x00u   /* R/W  CONFIG_PACKED              */
+#define RAAS_ACCEL_CNT_CLEAR     0x04u   /* R/W  [0]=PULSE (auto-clear)     */
+#define RAAS_ACCEL_CNT_SEL       0x08u   /* R/W  [3:0]=counter index        */
+#define RAAS_ACCEL_STATUS        0x0Cu   /* R    [0]=BUSY, [1]=DONE         */
+#define RAAS_ACCEL_CNT_VAL       0x10u   /* R    32-bit counter[CNT_SEL]    */
 
-/* CTRL bit fields */
-#define RAAS_CTRL_START          (1u << 0)
-#define RAAS_CTRL_ACT_BYPASS     (0u << 1)
-#define RAAS_CTRL_ACT_RELU       (1u << 1)
-#define RAAS_CTRL_ACT_SIGMOID    (2u << 1)
-#define RAAS_CTRL_ACT_MASK       (3u << 1)
+/* CONFIG_PACKED bit fields:
+ *   [3:0]   = M_size  (1..8)
+ *   [7:4]   = K_size
+ *   [11:8]  = N_size
+ *   [13:12] = ACT_MODE (0=bypass, 1=ReLU, 2=sigmoid)
+ *   [14]    = START (one-shot pulse, auto-clear)
+ */
+#define RAAS_CFG_M_SHIFT         0u
+#define RAAS_CFG_K_SHIFT         4u
+#define RAAS_CFG_N_SHIFT         8u
+#define RAAS_CFG_ACT_SHIFT       12u
+#define RAAS_CFG_START_BIT       (1u << 14)
+
+#define RAAS_CFG_ACT_BYPASS      (0u << RAAS_CFG_ACT_SHIFT)
+#define RAAS_CFG_ACT_RELU        (1u << RAAS_CFG_ACT_SHIFT)
+#define RAAS_CFG_ACT_SIGMOID     (2u << RAAS_CFG_ACT_SHIFT)
+#define RAAS_CFG_ACT_MASK        (3u << RAAS_CFG_ACT_SHIFT)
+
+/* Helper macro: pack (M, K, N, act) thành 1 CONFIG word KHÔNG có START.
+ * Firmware ghi CFG | RAAS_CFG_START_BIT để vừa setup vừa start trong 1 write. */
+#define RAAS_CFG_PACK(M, K, N, act) \
+    ((((uint32_t)(M) & 0xFu) << RAAS_CFG_M_SHIFT) | \
+     (((uint32_t)(K) & 0xFu) << RAAS_CFG_K_SHIFT) | \
+     (((uint32_t)(N) & 0xFu) << RAAS_CFG_N_SHIFT) | \
+     ((uint32_t)(act)))
 
 /* STATUS bit fields (DONE is sticky, cleared on next START write) */
 #define RAAS_STATUS_BUSY         (1u << 0)
 #define RAAS_STATUS_DONE         (1u << 1)
+
+/* CNT_CLEAR bit field */
+#define RAAS_CNT_CLEAR_PULSE     (1u << 0)
+
+/* Counter index (write vào CNT_SEL trước khi đọc CNT_VAL) */
+#define RAAS_CNT_IDX_IDLE        0u
+#define RAAS_CNT_IDX_LOAD_W      1u
+#define RAAS_CNT_IDX_LOAD_B      2u
+#define RAAS_CNT_IDX_LOAD_IN     3u
+#define RAAS_CNT_IDX_COMPUTE     4u
+#define RAAS_CNT_IDX_POST_PROC   5u
+#define RAAS_CNT_IDX_SEND        6u
+#define RAAS_CNT_IDX_DONE        7u
+#define RAAS_CNT_IDX_TOTAL       8u
+#define RAAS_CNT_IDX_PE_ACTIVE   9u
+#define RAAS_CNT_COUNT           10u
 
 /* ============================================================================
  * AXI DMA register offsets (Xilinx PG021 standard, Simple Mode)

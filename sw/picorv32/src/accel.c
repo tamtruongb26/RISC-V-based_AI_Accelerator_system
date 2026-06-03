@@ -1,7 +1,5 @@
 /******************************************************************************
- * accel.c — Accelerator AXI-Lite control implementation
- *
- * Plan ref: §8.3 (Step 14.3).
+ * accel.c — Accelerator AXI-Lite control implementation (Phase 0 layout)
  ******************************************************************************/
 
 #include "accel.h"
@@ -19,27 +17,33 @@ static inline uint32_t accel_read(uint32_t offset)
     return mmio_read32(RAAS_PICO_ACCEL_BASE + offset);
 }
 
+/* ── Config + start ────────────────────────────────────────────────────── */
+
 void accel_configure(uint32_t M, uint32_t K, uint32_t N, uint32_t act_mode)
 {
-    accel_write(RAAS_ACCEL_TILE_M, M);
-    accel_write(RAAS_ACCEL_TILE_K, K);
-    accel_write(RAAS_ACCEL_TILE_N, N);
-
-    /* Pre-write CTRL với act_mode nhưng KHÔNG set START.
-     * START sẽ được pulse riêng ở accel_start() để đảm bảo data path đã setup. */
-    accel_write(RAAS_ACCEL_CTRL, act_mode & RAAS_CTRL_ACT_MASK);
-
-    fence_iorw();   /* đảm bảo config writes hoàn thành trước khi start */
+    /* Ghi CFG nhưng KHÔNG set START bit. */
+    accel_write(RAAS_ACCEL_CFG, RAAS_CFG_PACK(M, K, N, act_mode));
+    fence_iorw();
 }
 
 void accel_start(void)
 {
-    /* Đọc CTRL hiện tại để giữ act_mode bits, rồi pulse START.
-     * Hardware tự clear START bit sau 1 cycle (auto-clear logic trong AXI shim). */
-    uint32_t ctrl = accel_read(RAAS_ACCEL_CTRL);
-    accel_write(RAAS_ACCEL_CTRL, ctrl | RAAS_CTRL_START);
+    /* Read CFG hiện tại, OR với START_BIT, write back.
+     * Hardware tự clear START sau 1 cycle. */
+    uint32_t cfg = accel_read(RAAS_ACCEL_CFG);
+    accel_write(RAAS_ACCEL_CFG, cfg | RAAS_CFG_START_BIT);
     fence_iorw();
 }
+
+void accel_configure_and_start(uint32_t M, uint32_t K, uint32_t N, uint32_t act_mode)
+{
+    /* Pack toàn bộ + START vào 1 word, 1 AXI-Lite write. */
+    accel_write(RAAS_ACCEL_CFG,
+                RAAS_CFG_PACK(M, K, N, act_mode) | RAAS_CFG_START_BIT);
+    fence_iorw();
+}
+
+/* ── Status polling ────────────────────────────────────────────────────── */
 
 int accel_wait_done(uint32_t timeout_cycles)
 {
@@ -55,4 +59,34 @@ int accel_wait_done(uint32_t timeout_cycles)
 uint32_t accel_get_status(void)
 {
     return accel_read(RAAS_ACCEL_STATUS);
+}
+
+/* ── Counter readback ──────────────────────────────────────────────────── */
+
+void accel_counters_clear(void)
+{
+    accel_write(RAAS_ACCEL_CNT_CLEAR, RAAS_CNT_CLEAR_PULSE);
+    fence_iorw();
+}
+
+uint32_t accel_counter_read(uint32_t idx)
+{
+    if (idx >= RAAS_CNT_COUNT) return 0;
+    accel_write(RAAS_ACCEL_CNT_SEL, idx);
+    fence_iorw();
+    return accel_read(RAAS_ACCEL_CNT_VAL);
+}
+
+void accel_counters_snapshot(accel_counters_t *out)
+{
+    out->idle      = accel_counter_read(RAAS_CNT_IDX_IDLE);
+    out->load_w    = accel_counter_read(RAAS_CNT_IDX_LOAD_W);
+    out->load_b    = accel_counter_read(RAAS_CNT_IDX_LOAD_B);
+    out->load_in   = accel_counter_read(RAAS_CNT_IDX_LOAD_IN);
+    out->compute   = accel_counter_read(RAAS_CNT_IDX_COMPUTE);
+    out->post_proc = accel_counter_read(RAAS_CNT_IDX_POST_PROC);
+    out->send      = accel_counter_read(RAAS_CNT_IDX_SEND);
+    out->done      = accel_counter_read(RAAS_CNT_IDX_DONE);
+    out->total     = accel_counter_read(RAAS_CNT_IDX_TOTAL);
+    out->pe_active = accel_counter_read(RAAS_CNT_IDX_PE_ACTIVE);
 }
