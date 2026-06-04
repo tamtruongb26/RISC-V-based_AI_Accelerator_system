@@ -229,6 +229,72 @@ for k in K-tiles:
 
 §7 đề xuất register offset mới (`SP_BASE_W/A`, `ACC_BASE`) — đó là cho **1a-ii** (scratchpad addressing). **1a-i chỉ cần 2 CFG spare bit**, gọn hơn, không đụng register map / BD. → cập nhật: ưu tiên CFG bit cho 1a-i.
 
+## 12. 1a-ii design — Scratchpad / data reuse
+
+### 12.1 Mục tiêu + layer nào hưởng lợi
+
+Cắt DDR traffic bằng cách **giữ data on-chip, không re-stream mỗi tile**. Quan trọng: reuse khác nhau theo layer:
+
+| Layer | Weight reuse (= M) | Input reuse (= #N-tile) | Hưởng lợi từ |
+|---|---|---|---|
+| Conv1 (M=576) | **72×** | nhỏ | **giữ weight** (không reload) |
+| Conv2 (M=64) | 8× | 2× | giữ weight |
+| FC (M=1) | **1× (không reuse được)** | nhiều | **giữ input** |
+
+→ FC1 weight 61KB nhưng mỗi weight dùng đúng 1 lần → scratchpad **không cắt được weight FC**. FC hưởng lợi từ **reuse input** (vector 256 dùng cho nhiều N-tile).
+
+### 12.2 Cơ chế cốt lõi (fit kiến trúc streaming hiện tại)
+
+**Insight:** weight ĐÃ nằm stationary trong `w_reg` của PE array. FSM hiện tại **reload mỗi tile** (lãng phí). Chỉ cần **bỏ reload** là có reuse — không cần DMA mới.
+
+→ Thêm **bit skip-reload** (CFG spare bit), firmware đẩy data 1 lần rồi báo accelerator "dùng lại":
+
+| Bit | Tên | Tác dụng |
+|---|---|---|
+| `CFG[17]` | `SKIP_W_LOAD` | Bỏ state LOAD_W → giữ weight cũ trong array (reuse qua M-tile) |
+| `CFG[18]` | `SKIP_IN_LOAD` | Bỏ state LOAD_IN → giữ input cũ trong `input_buf` (reuse qua N-tile) |
+
+→ Firmware: tile đầu load đủ; tile sau set skip bit + **không push** phần data tái dùng → cắt DMA + cắt copy_sub_to_tile.
+
+### 12.3 Vướng mắc: loop order K-acc vs weight-reuse (cần blocking)
+
+Hai mục tiêu đòi loop order **ngược nhau**:
+- **K-acc (1a-i):** K innermost (mỗi output cộng dồn qua K).
+- **Weight reuse:** M innermost (mỗi weight áp cho mọi M).
+
+Giải = **blocking** (như §3, §5 đã bàn): giữ block M output tile trong accumulator, K ngoài, M trong:
+```
+for n0:
+  for m_block (≤16 tile vừa accumulator):
+    for k0:
+      load W[k0,n0]  (1 lần — SKIP_W_LOAD cho các tile sau trong block)
+      for m0 in m_block:
+        compute (skip_w_load) → cộng dồn vào acc[m_block_offset + m0]
+    output cả block
+```
+
+→ **Đây là chỗ `accumulator.v` (1024 cell = 16 output tile) vào việc** — thay `psum_buf[8][8]` (1 tile của 1a-i) để giữ nhiều output tile đồng thời. Cần thêm **accumulator address** (offset theo m0 trong block) vào COMPUTE capture.
+
+### 12.4 Phạm vi + chia incremental
+
+| Sub | Việc | Rủi ro | Verify |
+|---|---|---|---|
+| **1a-ii-A** | `SKIP_W_LOAD` — bỏ reload weight, reuse qua M-tile | Thấp | sim: load 1 lần, 2 tile cùng W khác input |
+| **1a-ii-B** | `accumulator.v` thay `psum_buf` + accumulator addressing | Trung | sim: 1a-i Case 5 vẫn pass + multi-tile |
+| **1a-ii-C** | Blocking loop (K-acc + weight-reuse cùng lúc) + firmware | Cao | sim + firmware compile |
+| **1a-ii-D** | `SKIP_IN_LOAD` + input scratchpad (reuse input FC) | Trung | sim |
+
+### 12.5 Quan hệ với Phase 2c
+
+1a-ii vẫn giữ **firmware điều phối DMA** (chỉ thêm skip bit). Khác với **2c (CISC loop descriptor)** = accelerator **tự DMA**, firmware fire-and-forget. → 1a-ii là bước đệm hợp lý TRƯỚC 2c, không gộp. 2c sau sẽ thay vòng firmware bằng outer-loop FSM.
+
+### 12.6 Quyết định cần chốt
+
+- Làm **1a-ii-A trước** (SKIP_W_LOAD, surgical, demo weight reuse) rồi tăng dần B→C→D?
+- Hay làm trọn A→D liền (blocking đầy đủ, rework nặng hơn)?
+
+Khuyến nghị: **A→B→C→D tuần tự**, mỗi bước sim verify — đúng tinh thần incremental. A một mình đã đo được weight-reuse cho Conv.
+
 ## Cross-references
 - [implementation_plan.md](implementation_plan.md) Phase 1a
 - [limitations_solutions.md](limitations_solutions.md) §2, §3a, §4
