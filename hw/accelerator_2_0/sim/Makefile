@@ -46,10 +46,13 @@ define run_sim
 
 endef
 
-.PHONY: sim-all sim-pe sim-data_path sim-post_proc sim-accelerator_top sim-scratchpad clean
+.PHONY: sim-all sim-pe sim-data_path sim-post_proc sim-accelerator_top sim-scratchpad sim-accumulator clean
 
 sim-scratchpad:
 	$(call run_sim,scratchpad,$(HDL)/scratchpad.v,)
+
+sim-accumulator:
+	$(call run_sim,accumulator,$(HDL)/accumulator.v,)
 
 sim-pe:
 	$(call run_sim,pe,$(HDL)/pe.v,)
@@ -63,7 +66,7 @@ sim-post_proc:
 sim-accelerator_top:
 	$(call run_sim,accelerator_top,$(wildcard $(HDL)/*.v),1)
 
-sim-all: sim-pe sim-data_path sim-post_proc sim-scratchpad sim-accelerator_top
+sim-all: sim-pe sim-data_path sim-post_proc sim-scratchpad sim-accumulator sim-accelerator_top
 	@echo ""
 	@echo "════════════════════════════════════════════════════════════"
 	@echo " Toàn bộ unit sim Phase 0 PASS"
