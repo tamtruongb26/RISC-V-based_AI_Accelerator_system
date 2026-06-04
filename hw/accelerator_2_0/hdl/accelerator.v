@@ -74,6 +74,7 @@ module accelerator #(
     wire       post_skip;
     // ── Phase 1a-ii: data reuse control ──
     wire       skip_w_load;
+    wire [1:0] acc_slot;
 
     // ── Phase 0 instrumentation: counter control + readback ──
     wire        cnt_clear;
@@ -145,6 +146,7 @@ module accelerator #(
         .po_acc_accum    (acc_accum),
         .po_post_skip    (post_skip),
         .po_skip_w_load  (skip_w_load),
+        .po_acc_slot     (acc_slot),
         .po_cnt_clear    (cnt_clear),
         .po_cnt_sel      (cnt_sel),
         .pi_busy         (busy),
@@ -229,6 +231,7 @@ module accelerator #(
         .pi_acc_accum         (acc_accum),
         .pi_post_skip         (post_skip),
         .pi_skip_w_load       (skip_w_load),
+        .pi_acc_slot          (acc_slot),
         .po_busy              (busy),
         .po_done              (done),
         .pi_stream_data       (stream_data),

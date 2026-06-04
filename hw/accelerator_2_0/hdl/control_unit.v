@@ -3,7 +3,10 @@
 module control_unit #(
     parameter integer SA_N       = 8,
     parameter integer DATA_WIDTH = 16,
-    parameter integer ACC_WIDTH  = 40
+    parameter integer ACC_WIDTH  = 40,
+    // Phase 1a-ii-B: số output-tile slot trong accumulator (blocking).
+    // psum_buf[NUM_SLOTS][8][8] register → reuse = NUM_SLOTS× (cắt DDR weight).
+    parameter integer NUM_SLOTS  = 4
 )(
     input  wire                          pi_clk,
     input  wire                          pi_rst_n,
@@ -24,6 +27,8 @@ module control_unit #(
     // ── Phase 1a-ii: data reuse ──
     //   pi_skip_w_load = 1 : bỏ LOAD_W, giữ weight cũ trong array (reuse).
     input  wire                          pi_skip_w_load,
+    //   pi_acc_slot : chọn output-tile slot trong accumulator (blocking).
+    input  wire [1:0]                    pi_acc_slot,
     output reg                           po_busy,
     output reg                           po_done,
 
@@ -115,7 +120,8 @@ module control_unit #(
     reg [DATA_WIDTH-1:0]  weight_row_buf [0:SA_N-1];
     reg [DATA_WIDTH-1:0]  bias_buf       [0:SA_N-1];
     reg [DATA_WIDTH-1:0]  input_buf      [0:SA_N-1][0:SA_N-1];
-    reg [ACC_WIDTH-1:0]   psum_buf       [0:SA_N-1][0:SA_N-1];
+    // psum_buf[slot][m][n] — NUM_SLOTS output tile (Phase 1a-ii-B blocking)
+    reg [ACC_WIDTH-1:0]   psum_buf       [0:NUM_SLOTS-1][0:SA_N-1][0:SA_N-1];
     reg [DATA_WIDTH-1:0]  out_buf        [0:SA_N-1][0:SA_N-1];
 
     // ─────────────────────────────────────────────────────────────
@@ -315,12 +321,13 @@ module control_unit #(
                         m_capture = cmp_t - ni - SA_N;
                         if (m_capture >= 0 && m_capture < pi_tile_m_size) begin
                             // Phase 1a-i: cộng dồn (K>0) hoặc ghi đè (K=0).
+                            // Phase 1a-ii-B: vào slot pi_acc_slot (blocking).
                             if (pi_acc_accum)
-                                psum_buf[m_capture[2:0]][ni[2:0]] <=
-                                    psum_buf[m_capture[2:0]][ni[2:0]] +
+                                psum_buf[pi_acc_slot][m_capture[2:0]][ni[2:0]] <=
+                                    psum_buf[pi_acc_slot][m_capture[2:0]][ni[2:0]] +
                                     pi_dp_psum_bottom[ni*ACC_WIDTH +: ACC_WIDTH];
                             else
-                                psum_buf[m_capture[2:0]][ni[2:0]] <=
+                                psum_buf[pi_acc_slot][m_capture[2:0]][ni[2:0]] <=
                                     pi_dp_psum_bottom[ni*ACC_WIDTH +: ACC_WIDTH];
                         end
                     end
@@ -351,7 +358,7 @@ module control_unit #(
                 // ── Feed phase ──
                 if (pp_in_cnt < pi_tile_m_size * pi_tile_n_size) begin
                     po_pp_valid_in <= 1'b1;
-                    po_pp_acc_in   <= psum_buf[pp_in_m[2:0]][pp_in_n[2:0]];
+                    po_pp_acc_in   <= psum_buf[pi_acc_slot][pp_in_m[2:0]][pp_in_n[2:0]];
                     po_pp_bias     <= bias_buf[pp_in_n[2:0]];
                     if (pp_in_n == pi_tile_n_size[3:0] - 4'd1) begin
                         pp_in_n <= 4'd0;

@@ -37,6 +37,7 @@ module accelerator_slave_lite_v2_0_S00_AXI #(
     output wire         po_post_skip,   // slv_reg0[16] 1=bỏ post_proc+send
     // ── Phase 1a-ii: data reuse control ──
     output wire         po_skip_w_load, // slv_reg0[17] 1=giữ weight cũ (bỏ LOAD_W)
+    output wire [1:0]   po_acc_slot,    // slv_reg0[19:18] output-tile slot (blocking)
     // ── User-side inputs (từ control_unit/data_path) ──
     input  wire         pi_busy,
     input  wire         pi_done,
@@ -278,7 +279,9 @@ module accelerator_slave_lite_v2_0_S00_AXI #(
     assign po_acc_accum   = slv_reg0[15];
     assign po_post_skip   = slv_reg0[16];
     //   slv_reg0[17] = SKIP_W_LOAD (1=giữ weight trong array, bỏ LOAD_W)
+    //   slv_reg0[19:18] = ACC_SLOT (output-tile slot trong accumulator)
     assign po_skip_w_load = slv_reg0[17];
+    assign po_acc_slot    = slv_reg0[19:18];
     assign po_cnt_clear   = slv_reg1[0];
     assign po_cnt_sel     = slv_reg2[3:0];
 

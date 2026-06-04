@@ -536,6 +536,102 @@ module accelerator_top_tb;
     endtask
 
     // ─────────────────────────────────────────────────────────────
+    // Case 7: accumulator slot independence (Phase 1a-ii-B)
+    //   W nạp 1 lần, reuse (skip_w) cho mọi compute.
+    //   slot0 ← A1 (overwrite, post_skip), slot1 ← A2 (overwrite, post_skip) → giữ.
+    //   Xuất slot: compute zero-input + accumulate (cộng 0 → slot không đổi) +
+    //   post → output slot. So với fresh A×W. Verify 2 slot độc lập + post đúng slot.
+    // ─────────────────────────────────────────────────────────────
+    task automatic run_slot_check();
+        integer m, k, n, i, nw, local_errs;
+        reg [31:0] c0_blk [0:63];
+        reg [31:0] c1_blk [0:63];
+        reg [31:0] cfg;
+
+        for (i = 0; i < 64; i = i + 1) W_mem[i] = 16'h0;
+        for (i = 0; i < 8;  i = i + 1) bias_mem[i] = 16'h0;
+        for (k = 0; k < 8; k = k + 1)
+            for (n = 0; n < 4; n = n + 1)
+                W_mem[k*8 + n] = 16'h0040 + k*16'h0008 + n;
+        nw  = 4 * ((4 + 1) >> 1);
+        cfg = (4 & 32'hF) | ((8 & 32'hF) << 4) | ((4 & 32'hF) << 8);
+
+        reset_dut();
+        @(negedge clk); capture_enable = 1'b0; capture_reset = 1'b1;
+        @(posedge clk); @(negedge clk); capture_reset = 1'b0;
+
+        // slot0 ← A1 (load W, overwrite, post_skip)
+        for (m = 0; m < 4; m = m + 1) for (k = 0; k < 8; k = k + 1)
+            A_mem[m*8 + k] = 16'h0100 + m*16'h0010 + k;
+        axi_lite_write(5'h00, cfg | (32'h1<<14) | (32'h1<<16) | (32'd0<<18));
+        push_tile(4, 8);
+        wait_done("slot.w0");
+
+        // slot1 ← A2 (skip_w, overwrite, post_skip)
+        for (m = 0; m < 4; m = m + 1) for (k = 0; k < 8; k = k + 1)
+            A_mem[m*8 + k] = 16'h0080 + m*16'h0008 + k;
+        axi_lite_write(5'h00, cfg | (32'h1<<14) | (32'h1<<16) | (32'h1<<17) | (32'd1<<18));
+        push_bias_input(4, 8);
+        wait_done("slot.w1");
+
+        // Xuất slot0: zero-input + accumulate + post (slot không đổi)
+        for (i = 0; i < 64; i = i + 1) A_mem[i] = 16'h0;
+        @(negedge clk); capture_reset = 1'b1;
+        @(posedge clk); @(negedge clk); capture_reset = 1'b0; capture_enable = 1'b1;
+        axi_lite_write(5'h00, cfg | (32'h1<<14) | (32'h1<<15) | (32'h1<<17) | (32'd0<<18));
+        push_bias_input(4, 8);
+        wait_done("slot.r0");
+        @(posedge clk); capture_enable = 1'b0;
+        for (i = 0; i < nw; i = i + 1) c0_blk[i] = capture_buf[i];
+
+        // Xuất slot1
+        @(negedge clk); capture_reset = 1'b1;
+        @(posedge clk); @(negedge clk); capture_reset = 1'b0; capture_enable = 1'b1;
+        axi_lite_write(5'h00, cfg | (32'h1<<14) | (32'h1<<15) | (32'h1<<17) | (32'd1<<18));
+        push_bias_input(4, 8);
+        wait_done("slot.r1");
+        @(posedge clk); capture_enable = 1'b0;
+        for (i = 0; i < nw; i = i + 1) c1_blk[i] = capture_buf[i];
+
+        // Ref slot0: fresh A1×W
+        local_errs = 0;
+        reset_dut();
+        for (m = 0; m < 4; m = m + 1) for (k = 0; k < 8; k = k + 1)
+            A_mem[m*8 + k] = 16'h0100 + m*16'h0010 + k;
+        @(negedge clk); capture_reset = 1'b1;
+        @(posedge clk); @(negedge clk); capture_reset = 1'b0; capture_enable = 1'b1;
+        axi_lite_write(5'h00, cfg | (32'h1<<14));
+        push_tile(4, 8);
+        wait_done("slot.ref0");
+        @(posedge clk); capture_enable = 1'b0;
+        for (i = 0; i < nw; i = i + 1)
+            if (c0_blk[i] !== capture_buf[i]) begin
+                $display("[FAIL] slot0 word %0d: blk=0x%h ref=0x%h", i, c0_blk[i], capture_buf[i]);
+                local_errs = local_errs + 1;
+            end
+
+        // Ref slot1: fresh A2×W
+        reset_dut();
+        for (m = 0; m < 4; m = m + 1) for (k = 0; k < 8; k = k + 1)
+            A_mem[m*8 + k] = 16'h0080 + m*16'h0008 + k;
+        @(negedge clk); capture_reset = 1'b1;
+        @(posedge clk); @(negedge clk); capture_reset = 1'b0; capture_enable = 1'b1;
+        axi_lite_write(5'h00, cfg | (32'h1<<14));
+        push_tile(4, 8);
+        wait_done("slot.ref1");
+        @(posedge clk); capture_enable = 1'b0;
+        for (i = 0; i < nw; i = i + 1)
+            if (c1_blk[i] !== capture_buf[i]) begin
+                $display("[FAIL] slot1 word %0d: blk=0x%h ref=0x%h", i, c1_blk[i], capture_buf[i]);
+                local_errs = local_errs + 1;
+            end
+
+        if (local_errs == 0)
+            $display("[ OK ] slot: 2 slot độc lập, post đúng slot (%0d words each)", nw);
+        errs = errs + local_errs;
+    endtask
+
+    // ─────────────────────────────────────────────────────────────
     // Main stimulus
     // ─────────────────────────────────────────────────────────────
     initial begin
@@ -598,6 +694,11 @@ module accelerator_top_tb;
         $display("");
         $display("==== Case 6: weight reuse (SKIP_W_LOAD) ====");
         run_skipw_check();
+
+        // ─────────── Case 7: accumulator slot (Phase 1a-ii-B) ───────────
+        $display("");
+        $display("==== Case 7: accumulator slot independence ====");
+        run_slot_check();
 
         // ─────────── Summary ───────────
         $display("");

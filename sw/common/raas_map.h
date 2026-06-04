@@ -59,8 +59,11 @@
 #define RAAS_CFG_POST_SKIP       (1u << 16)
 
 /* Phase 1a-ii: data reuse (CFG spare bit).
- *   [17] SKIP_W_LOAD : 1 = giữ weight cũ trong array (bỏ LOAD_W), 0 = nạp weight */
+ *   [17]    SKIP_W_LOAD : 1 = giữ weight cũ trong array (bỏ LOAD_W), 0 = nạp weight
+ *   [19:18] ACC_SLOT    : output-tile slot trong accumulator (blocking, 0..3) */
 #define RAAS_CFG_SKIP_W_LOAD     (1u << 17)
+#define RAAS_CFG_ACC_SLOT_SHIFT  18u
+#define RAAS_CFG_ACC_SLOT(s)     (((uint32_t)(s) & 0x3u) << RAAS_CFG_ACC_SLOT_SHIFT)
 
 #define RAAS_CFG_ACT_BYPASS      (0u << RAAS_CFG_ACT_SHIFT)
 #define RAAS_CFG_ACT_RELU        (1u << RAAS_CFG_ACT_SHIFT)
