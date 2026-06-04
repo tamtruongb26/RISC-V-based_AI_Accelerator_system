@@ -153,6 +153,82 @@ Harness sim: thêm target vào [hw/accelerator_2_0/sim/Makefile](../hw/accelerat
 | BRAM mapping không khớp 256-bit ACC | Tính lại width/tile thật, để synthesis xác nhận |
 | Block size sai → ACC tràn | Sweep block size; bắt đầu nhỏ (8 tile) rồi tăng |
 
+## 11. Integration plan (sau khi đọc control_unit.v + accelerator.v)
+
+### 11.1 Kiến trúc hiện tại (tóm tắt từ RTL)
+
+Accelerator là **streaming tile engine**, firmware điều phối:
+- FSM: `IDLE → LOAD_W_RECV/PULSE → LOAD_BIAS → LOAD_IN → COMPUTE → POST_PROC → SEND_OUT → DONE`.
+- Data vào qua **AXIS slave** (firmware DMA push weight→bias→input mỗi tile), ra qua **AXIS master**.
+- Buffer nội bộ: `weight_row_buf`, `bias_buf`, `input_buf[8][8]`, **`psum_buf[8][8]`** (1 tile), `out_buf[8][8]`.
+- COMPUTE capture psum vào `psum_buf` (ghi đè), POST_PROC tiêu thụ ngay → SEND.
+- Với K>8: **firmware tự K-accumulation bằng SW** (gửi bias=0, cộng dồn trong DDR — [gemm_tile.c](../sw/picorv32/src/gemm_tile.c#L184)).
+
+### 11.2 Chia phạm vi theo rủi ro (QUYẾT ĐỊNH quan trọng)
+
+Scratchpad-reuse đòi accelerator **tự quản data movement** (load 1 lần, reuse nhiều tile) → đụng protocol AXIS + cách firmware điều phối → thực chất gần với **Phase 2c (CISC loop)**. Nên tách:
+
+| Sub-step | Việc | Rủi ro | Fit model hiện tại? |
+|---|---|---|---|
+| **1a-i** | **Accumulator — HW K-accumulation** | Thấp | ✓ Vừa streaming model |
+| **1a-ii** | Scratchpad reuse (load-once, blocking) | Cao | ✗ Cần protocol rework, gộp với 2c |
+
+→ **Khuyến nghị: làm 1a-i trước** (giải dứt điểm Vấn đề 3a, giá trị cao, rủi ro thấp). 1a-ii để sau / gộp 2c.
+
+### 11.3 Thiết kế 1a-i — HW K-accumulation (minimal, surgical)
+
+**Ý tưởng:** biến `psum_buf` từ ghi-đè-mỗi-tile thành **cộng-dồn-qua-K-tile**, và **tách POST_PROC** để chỉ chạy ở K-tile cuối.
+
+**2 bit điều khiển mới — nhét vào CFG spare bit (KHÔNG cần register mới, KHÔNG nới AXI addr):**
+
+CFG hiện dùng `[14:0]` (M/K/N/ACT/START), còn trống `[31:15]`:
+
+| Bit | Tên | Ý nghĩa |
+|---|---|---|
+| `CFG[15]` | `ACC_OVERWRITE` | 1 = K-tile 0 (ghi đè psum_buf); 0 = K-tile>0 (cộng dồn) |
+| `CFG[16]` | `POST_EN` | 1 = K-tile cuối (chạy POST_PROC + SEND); 0 = chỉ cộng dồn, bỏ qua output |
+
+**Sửa RTL (surgical, 3 chỗ):**
+
+1. `slave_lite`: thêm 2 output `po_acc_overwrite = slv_reg0[15]`, `po_post_en = slv_reg0[16]`.
+2. `accelerator.v`: wire 2 tín hiệu mới slave_lite → control_unit.
+3. `control_unit.v`:
+   - Thêm 2 input `pi_acc_overwrite`, `pi_post_en`.
+   - COMPUTE capture ([L301](../hw/accelerator_2_0/hdl/control_unit.v#L301)):
+     ```
+     if (pi_acc_overwrite) psum_buf[m][n] <= psum_bottom;
+     else                  psum_buf[m][n] <= psum_buf[m][n] + psum_bottom;
+     ```
+   - COMPUTE→next transition ([L308](../hw/accelerator_2_0/hdl/control_unit.v#L308)):
+     ```
+     if (pi_post_en) state <= ST_POST_PROC;   // K cuối: post_proc + send
+     else            state <= ST_DONE;          // K giữa: chỉ cộng dồn
+     ```
+
+→ Không reset `psum_buf` giữa tile → nó tự persist qua các K-tile.
+
+**Firmware tương ứng (gemm_tile.c):** bỏ vòng SW accumulation (step 10), thay bằng:
+```
+for k in K-tiles:
+    acc_overwrite = (k==0); post_en = (k==last)
+    push weight[k]+bias+input[k]; start(CFG | acc_overwrite<<15 | post_en<<16)
+    wait done
+    if post_en: receive output    // chỉ nhận output 1 lần ở K cuối
+```
+
+**Verify (sim, không cần board):** mở rộng `accelerator_top_tb`:
+- Case mới: 2 K-tile, K0 (overwrite, post_en=0) + K1 (accumulate, post_en=1) → output = post_proc(psum_K0 + psum_K1). So với golden.
+
+### 11.4 Vai trò module đã build
+
+- `accumulator.v` (1024 cell): primitive cho **1a-ii** (giữ nhiều output tile khi blocking). 1a-i dùng `psum_buf` sẵn có (1 tile, đủ cho K-acc single-tile) → không cần instantiate accumulator.v ngay.
+- `scratchpad.v`: primitive cho **1a-ii**.
+→ 2 module đã verified, sẵn sàng cho 1a-ii; 1a-i không phụ thuộc chúng.
+
+### 11.5 Khác biệt với §7 ở trên
+
+§7 đề xuất register offset mới (`SP_BASE_W/A`, `ACC_BASE`) — đó là cho **1a-ii** (scratchpad addressing). **1a-i chỉ cần 2 CFG spare bit**, gọn hơn, không đụng register map / BD. → cập nhật: ưu tiên CFG bit cho 1a-i.
+
 ## Cross-references
 - [implementation_plan.md](implementation_plan.md) Phase 1a
 - [limitations_solutions.md](limitations_solutions.md) §2, §3a, §4
