@@ -64,6 +64,8 @@
 #define RAAS_CFG_SKIP_W_LOAD     (1u << 17)
 #define RAAS_CFG_ACC_SLOT_SHIFT  18u
 #define RAAS_CFG_ACC_SLOT(s)     (((uint32_t)(s) & 0x3u) << RAAS_CFG_ACC_SLOT_SHIFT)
+/*   [20] SKIP_IN_LOAD : 1 = giữ input cũ trong input_buf (bỏ LOAD_IN, reuse FC) */
+#define RAAS_CFG_SKIP_IN_LOAD    (1u << 20)
 
 #define RAAS_CFG_ACT_BYPASS      (0u << RAAS_CFG_ACT_SHIFT)
 #define RAAS_CFG_ACT_RELU        (1u << RAAS_CFG_ACT_SHIFT)

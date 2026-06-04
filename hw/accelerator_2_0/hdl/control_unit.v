@@ -29,6 +29,8 @@ module control_unit #(
     input  wire                          pi_skip_w_load,
     //   pi_acc_slot : chọn output-tile slot trong accumulator (blocking).
     input  wire [1:0]                    pi_acc_slot,
+    //   pi_skip_in_load = 1 : bỏ LOAD_IN, giữ input cũ trong input_buf (reuse).
+    input  wire                          pi_skip_in_load,
     output reg                           po_busy,
     output reg                           po_done,
 
@@ -282,9 +284,15 @@ module control_unit #(
                     bias_buf[{bias_pair[2:0], 1'b0}] <= pi_stream_data[15:0];
                     bias_buf[{bias_pair[2:0], 1'b1}] <= pi_stream_data[31:16];
                     if (bias_pair == WORDS_PER_ROW - 1) begin
-                        state    <= ST_LOAD_IN;
-                        in_m     <= 4'd0;
-                        in_kpair <= 4'd0;
+                        // 1a-ii-D: skip_in_load → giữ input cũ, vào thẳng COMPUTE.
+                        if (pi_skip_in_load) begin
+                            state <= ST_COMPUTE;
+                            cmp_t <= 10'd0;
+                        end else begin
+                            state    <= ST_LOAD_IN;
+                            in_m     <= 4'd0;
+                            in_kpair <= 4'd0;
+                        end
                     end else begin
                         bias_pair <= bias_pair + 4'd1;
                     end
