@@ -14,6 +14,13 @@ module control_unit #(
     input  wire [9:0]                    pi_tile_n_size,
     input  wire [1:0]                    pi_act_mode,
     input  wire                          pi_start,
+    // ── Phase 1a-i: HW K-accumulation control ──
+    //   pi_acc_accum = 1 : COMPUTE cộng dồn vào psum_buf (K-tile > 0)
+    //                = 0 : ghi đè psum_buf (K-tile 0 / single-tile — mặc định cũ)
+    //   pi_post_skip = 1 : sau COMPUTE bỏ POST_PROC+SEND, về DONE (K-tile giữa)
+    //                = 0 : chạy POST_PROC+SEND như cũ (K-tile cuối / single)
+    input  wire                          pi_acc_accum,
+    input  wire                          pi_post_skip,
     output reg                           po_busy,
     output reg                           po_done,
 
@@ -298,21 +305,33 @@ module control_unit #(
                     if (pi_dp_valid_bottom[ni] && (ni < pi_tile_n_size)) begin
                         m_capture = cmp_t - ni - SA_N;
                         if (m_capture >= 0 && m_capture < pi_tile_m_size) begin
-                            psum_buf[m_capture[2:0]][ni[2:0]] <=
-                                pi_dp_psum_bottom[ni*ACC_WIDTH +: ACC_WIDTH];
+                            // Phase 1a-i: cộng dồn (K>0) hoặc ghi đè (K=0).
+                            if (pi_acc_accum)
+                                psum_buf[m_capture[2:0]][ni[2:0]] <=
+                                    psum_buf[m_capture[2:0]][ni[2:0]] +
+                                    pi_dp_psum_bottom[ni*ACC_WIDTH +: ACC_WIDTH];
+                            else
+                                psum_buf[m_capture[2:0]][ni[2:0]] <=
+                                    pi_dp_psum_bottom[ni*ACC_WIDTH +: ACC_WIDTH];
                         end
                     end
                 end
 
                 // Transition khi cycle cuối
                 if (cmp_t == (pi_tile_m_size + pi_tile_n_size + (SA_N - 2))) begin
-                    state      <= ST_POST_PROC;
-                    pp_in_m    <= 4'd0;
-                    pp_in_n    <= 4'd0;
-                    pp_in_cnt  <= 10'd0;
-                    pp_out_m   <= 4'd0;
-                    pp_out_n   <= 4'd0;
-                    pp_out_cnt <= 10'd0;
+                    // Phase 1a-i: K-tile giữa (post_skip) chỉ cộng dồn → về DONE,
+                    // không POST_PROC/SEND. K-tile cuối (hoặc single) → POST_PROC.
+                    if (pi_post_skip) begin
+                        state <= ST_DONE;
+                    end else begin
+                        state      <= ST_POST_PROC;
+                        pp_in_m    <= 4'd0;
+                        pp_in_n    <= 4'd0;
+                        pp_in_cnt  <= 10'd0;
+                        pp_out_m   <= 4'd0;
+                        pp_out_n   <= 4'd0;
+                        pp_out_cnt <= 10'd0;
+                    end
                 end else begin
                     cmp_t <= cmp_t + 10'd1;
                 end

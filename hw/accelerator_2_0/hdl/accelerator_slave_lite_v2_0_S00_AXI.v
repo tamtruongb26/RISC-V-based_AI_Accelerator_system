@@ -32,6 +32,9 @@ module accelerator_slave_lite_v2_0_S00_AXI #(
     output wire [1:0]   po_act_mode,
     output wire         po_cnt_clear,
     output wire [3:0]   po_cnt_sel,
+    // ── Phase 1a-i: HW K-accumulation control (CFG spare bits) ──
+    output wire         po_acc_accum,   // slv_reg0[15] 1=cộng dồn, 0=ghi đè
+    output wire         po_post_skip,   // slv_reg0[16] 1=bỏ post_proc+send
     // ── User-side inputs (từ control_unit/data_path) ──
     input  wire         pi_busy,
     input  wire         pi_done,
@@ -268,6 +271,10 @@ module accelerator_slave_lite_v2_0_S00_AXI #(
     assign po_tile_n_size = slv_reg0[11:8];
     assign po_act_mode    = slv_reg0[13:12];
     assign po_start       = slv_reg0[14];
+    //   slv_reg0[15] = ACC_ACCUM (1=cộng dồn psum_buf, 0=ghi đè — mặc định cũ)
+    //   slv_reg0[16] = POST_SKIP (1=bỏ POST_PROC+SEND, 0=làm — mặc định cũ)
+    assign po_acc_accum   = slv_reg0[15];
+    assign po_post_skip   = slv_reg0[16];
     assign po_cnt_clear   = slv_reg1[0];
     assign po_cnt_sel     = slv_reg2[3:0];
 

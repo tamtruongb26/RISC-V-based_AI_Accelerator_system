@@ -69,6 +69,9 @@ module accelerator #(
     wire [1:0] act_mode;
     wire       start;
     wire       busy, done;
+    // ── Phase 1a-i: HW K-accumulation control ──
+    wire       acc_accum;
+    wire       post_skip;
 
     // ── Phase 0 instrumentation: counter control + readback ──
     wire        cnt_clear;
@@ -137,6 +140,8 @@ module accelerator #(
         .po_tile_n_size  (tile_n_4),
         .po_start        (start),
         .po_act_mode     (act_mode),
+        .po_acc_accum    (acc_accum),
+        .po_post_skip    (post_skip),
         .po_cnt_clear    (cnt_clear),
         .po_cnt_sel      (cnt_sel),
         .pi_busy         (busy),
@@ -218,6 +223,8 @@ module accelerator #(
         .pi_tile_n_size       (tile_n_size),
         .pi_act_mode          (act_mode),
         .pi_start             (start),
+        .pi_acc_accum         (acc_accum),
+        .pi_post_skip         (post_skip),
         .po_busy              (busy),
         .po_done              (done),
         .pi_stream_data       (stream_data),

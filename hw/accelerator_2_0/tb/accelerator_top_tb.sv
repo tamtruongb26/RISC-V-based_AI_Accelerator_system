@@ -350,6 +350,112 @@ module accelerator_top_tb;
     endtask
 
     // ─────────────────────────────────────────────────────────────
+    // Phase 1a-i helpers: push tile data + wait DONE
+    // ─────────────────────────────────────────────────────────────
+    task automatic push_tile(input integer M, input integer K);
+        integer r, p, m, Kp;
+        reg [15:0] lo, hi;
+        for (r = 0; r < SA_N; r = r + 1)
+            for (p = 0; p < 4; p = p + 1)
+                axis_push({W_mem[r*8 + p*2 + 1], W_mem[r*8 + p*2]});
+        for (p = 0; p < 4; p = p + 1)
+            axis_push({bias_mem[p*2 + 1], bias_mem[p*2]});
+        Kp = (K + 1) >> 1;
+        for (m = 0; m < M; m = m + 1)
+            for (p = 0; p < Kp; p = p + 1) begin
+                lo = A_mem[m*K + 2*p];
+                hi = (2*p + 1 < K) ? A_mem[m*K + 2*p + 1] : 16'h0;
+                axis_push({hi, lo});
+            end
+    endtask
+
+    task automatic wait_done(input string tag);
+        reg [31:0] status;
+        integer timeout;
+        timeout = 0; status = 32'h0;
+        while (!status[1] && timeout < 2000) begin
+            axi_lite_read(5'h0C, status);
+            timeout = timeout + 1;
+        end
+        if (timeout >= 2000) begin
+            $display("[FAIL] %s: TIMEOUT waiting DONE", tag);
+            errs = errs + 1;
+        end
+    endtask
+
+    // ─────────────────────────────────────────────────────────────
+    // Case 5: HW K-accumulation (Phase 1a-i)
+    //   Tính chất tự kiểm: K-acc(P + P) == single-tile(2P).
+    //   K0: overwrite (acc_accum=0), post_skip=1 → chỉ cộng dồn, không output.
+    //   K1: accumulate (acc_accum=1), post_skip=0 → output = post_proc(P+P).
+    //   Ref: single tile với 2×A → psum = 2P → output = post_proc(2P).
+    //   2 đường phải khớp từng word.
+    // ─────────────────────────────────────────────────────────────
+    task automatic run_kaccum_check();
+        integer m, k, n, i, nw, local_errs;
+        reg [31:0] out_kacc [0:63];
+        reg [31:0] cfg;
+
+        // Data M=4,K=8,N=4, bias=0, act=bypass — giá trị nhỏ (2× không tràn)
+        for (i = 0; i < 64; i = i + 1) begin A_mem[i] = 16'h0; W_mem[i] = 16'h0; end
+        for (i = 0; i < 8;  i = i + 1) bias_mem[i] = 16'h0;
+        for (m = 0; m < 4; m = m + 1)
+            for (k = 0; k < 8; k = k + 1)
+                A_mem[m*8 + k] = 16'h0080 + m*16'h0010 + k;
+        for (k = 0; k < 8; k = k + 1)
+            for (n = 0; n < 4; n = n + 1)
+                W_mem[k*8 + n] = 16'h0040 + k*16'h0008 + n;
+        nw  = 4 * ((4 + 1) >> 1);                       // M × ⌈N/2⌉ = 8 word
+        cfg = (4 & 32'hF) | ((8 & 32'hF) << 4) | ((4 & 32'hF) << 8);   // M=4,K=8,N=4,bypass
+
+        // ── K-acc run (KHÔNG reset giữa K0 và K1 → psum_buf persist) ──
+        reset_dut();
+        @(negedge clk); capture_enable = 1'b0; capture_reset = 1'b1;
+        @(posedge clk); @(negedge clk); capture_reset = 1'b0; capture_enable = 1'b1;
+
+        // K0: START | post_skip(bit16); acc_accum=0 (overwrite)
+        axi_lite_write(5'h00, cfg | (32'h1 << 14) | (32'h1 << 16));
+        push_tile(4, 8);
+        wait_done("kacc.K0");
+
+        // K1: START | acc_accum(bit15); post_skip=0 (output)
+        axi_lite_write(5'h00, cfg | (32'h1 << 14) | (32'h1 << 15));
+        push_tile(4, 8);
+        wait_done("kacc.K1");
+
+        @(posedge clk); capture_enable = 1'b0;
+        for (i = 0; i < nw; i = i + 1) out_kacc[i] = capture_buf[i];
+
+        // ── Reference: single tile với 2×A → 2P ──
+        for (m = 0; m < 4; m = m + 1)
+            for (k = 0; k < 8; k = k + 1)
+                A_mem[m*8 + k] = (16'h0080 + m*16'h0010 + k) << 1;
+        reset_dut();
+        @(negedge clk); capture_enable = 1'b0; capture_reset = 1'b1;
+        @(posedge clk); @(negedge clk); capture_reset = 1'b0; capture_enable = 1'b1;
+        axi_lite_write(5'h00, cfg | (32'h1 << 14));     // overwrite + post (mặc định)
+        push_tile(4, 8);
+        wait_done("kacc.ref");
+        @(posedge clk); capture_enable = 1'b0;
+
+        // ── So sánh ──
+        local_errs = 0;
+        if (capture_count !== nw) begin
+            $display("[FAIL] kaccum ref: captured %0d words, expected %0d", capture_count, nw);
+            local_errs = local_errs + 1;
+        end
+        for (i = 0; i < nw; i = i + 1)
+            if (out_kacc[i] !== capture_buf[i]) begin
+                $display("[FAIL] kaccum word %0d: kacc=0x%h ref=0x%h",
+                         i, out_kacc[i], capture_buf[i]);
+                local_errs = local_errs + 1;
+            end
+        if (local_errs == 0)
+            $display("[ OK ] kaccum: K0+K1 (P+P) == single 2P (%0d words)", nw);
+        errs = errs + local_errs;
+    endtask
+
+    // ─────────────────────────────────────────────────────────────
     // Main stimulus
     // ─────────────────────────────────────────────────────────────
     initial begin
@@ -402,6 +508,11 @@ module accelerator_top_tb;
         run_one_tile("top_case4a", 8, 8, 8, 0);
         // KHÔNG reset → verify tile B vẫn đúng
         run_one_tile("top_case4b", 8, 8, 8, 0);
+
+        // ─────────── Case 5: HW K-accumulation (Phase 1a-i) ───────────
+        $display("");
+        $display("==== Case 5: HW K-accumulation (P+P == 2P) ====");
+        run_kaccum_check();
 
         // ─────────── Summary ───────────
         $display("");
