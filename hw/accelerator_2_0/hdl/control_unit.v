@@ -21,6 +21,9 @@ module control_unit #(
     //                = 0 : chạy POST_PROC+SEND như cũ (K-tile cuối / single)
     input  wire                          pi_acc_accum,
     input  wire                          pi_post_skip,
+    // ── Phase 1a-ii: data reuse ──
+    //   pi_skip_w_load = 1 : bỏ LOAD_W, giữ weight cũ trong array (reuse).
+    input  wire                          pi_skip_w_load,
     output reg                           po_busy,
     output reg                           po_done,
 
@@ -227,10 +230,16 @@ module control_unit #(
             ST_IDLE: begin
                 po_busy <= 1'b0;
                 if (pi_start) begin
-                    state   <= ST_LOAD_W_RECV;
                     po_busy <= 1'b1;
-                    w_row   <= 4'd0;
-                    w_pair  <= 4'd0;
+                    if (pi_skip_w_load) begin
+                        // 1a-ii: giữ weight cũ trong array → bỏ thẳng sang LOAD_BIAS.
+                        state     <= ST_LOAD_BIAS;
+                        bias_pair <= 4'd0;
+                    end else begin
+                        state   <= ST_LOAD_W_RECV;
+                        w_row   <= 4'd0;
+                        w_pair  <= 4'd0;
+                    end
                 end
             end
 

@@ -455,6 +455,86 @@ module accelerator_top_tb;
         errs = errs + local_errs;
     endtask
 
+    task automatic push_bias_input(input integer M, input integer K);
+        integer p, m, Kp;
+        reg [15:0] lo, hi;
+        for (p = 0; p < 4; p = p + 1)
+            axis_push({bias_mem[p*2 + 1], bias_mem[p*2]});
+        Kp = (K + 1) >> 1;
+        for (m = 0; m < M; m = m + 1)
+            for (p = 0; p < Kp; p = p + 1) begin
+                lo = A_mem[m*K + 2*p];
+                hi = (2*p + 1 < K) ? A_mem[m*K + 2*p + 1] : 16'h0;
+                axis_push({hi, lo});
+            end
+    endtask
+
+    // ─────────────────────────────────────────────────────────────
+    // Case 6: weight reuse via SKIP_W_LOAD (Phase 1a-ii-A)
+    //   Run1: load W + input A1 (compute, để W lại trong array).
+    //   Run2: SKIP_W_LOAD + input A2 (KHÔNG push weight) → C2_reuse.
+    //         KHÔNG reset giữa Run1/Run2 → kiểm residual psum.
+    //   Run3 (ref): reset, fresh load W + input A2 → C2_ref.
+    //   C2_reuse phải == C2_ref.
+    // ─────────────────────────────────────────────────────────────
+    task automatic run_skipw_check();
+        integer m, k, n, i, nw, local_errs;
+        reg [31:0] out_reuse [0:63];
+        reg [31:0] cfg;
+
+        for (i = 0; i < 64; i = i + 1) begin A_mem[i] = 16'h0; W_mem[i] = 16'h0; end
+        for (i = 0; i < 8;  i = i + 1) bias_mem[i] = 16'h0;
+        for (k = 0; k < 8; k = k + 1)
+            for (n = 0; n < 4; n = n + 1)
+                W_mem[k*8 + n] = 16'h0040 + k*16'h0008 + n;
+        nw  = 4 * ((4 + 1) >> 1);
+        cfg = (4 & 32'hF) | ((8 & 32'hF) << 4) | ((4 & 32'hF) << 8);   // 4x8x4 bypass
+
+        reset_dut();
+
+        // ── Run1: fresh load W + input A1 (không capture) ──
+        for (m = 0; m < 4; m = m + 1)
+            for (k = 0; k < 8; k = k + 1)
+                A_mem[m*8 + k] = 16'h0100 + m*16'h0010 + k;
+        @(negedge clk); capture_enable = 1'b0; capture_reset = 1'b1;
+        @(posedge clk); @(negedge clk); capture_reset = 1'b0;
+        axi_lite_write(5'h00, cfg | (32'h1 << 14));      // normal load+post
+        push_tile(4, 8);
+        wait_done("skipw.run1");
+
+        // ── Run2: SKIP_W_LOAD + input A2 (reuse W, không push weight) ──
+        for (m = 0; m < 4; m = m + 1)
+            for (k = 0; k < 8; k = k + 1)
+                A_mem[m*8 + k] = 16'h0080 + m*16'h0008 + k;
+        @(negedge clk); capture_reset = 1'b1;
+        @(posedge clk); @(negedge clk); capture_reset = 1'b0; capture_enable = 1'b1;
+        axi_lite_write(5'h00, cfg | (32'h1 << 14) | (32'h1 << 17));   // SKIP_W_LOAD
+        push_bias_input(4, 8);
+        wait_done("skipw.run2");
+        @(posedge clk); capture_enable = 1'b0;
+        for (i = 0; i < nw; i = i + 1) out_reuse[i] = capture_buf[i];
+
+        // ── Run3 (ref): reset + fresh load W + input A2 ──
+        reset_dut();
+        @(negedge clk); capture_enable = 1'b0; capture_reset = 1'b1;
+        @(posedge clk); @(negedge clk); capture_reset = 1'b0; capture_enable = 1'b1;
+        axi_lite_write(5'h00, cfg | (32'h1 << 14));
+        push_tile(4, 8);
+        wait_done("skipw.ref");
+        @(posedge clk); capture_enable = 1'b0;
+
+        local_errs = 0;
+        for (i = 0; i < nw; i = i + 1)
+            if (out_reuse[i] !== capture_buf[i]) begin
+                $display("[FAIL] skipw word %0d: reuse=0x%h ref=0x%h",
+                         i, out_reuse[i], capture_buf[i]);
+                local_errs = local_errs + 1;
+            end
+        if (local_errs == 0)
+            $display("[ OK ] skipw: reuse-W == fresh-load (%0d words)", nw);
+        errs = errs + local_errs;
+    endtask
+
     // ─────────────────────────────────────────────────────────────
     // Main stimulus
     // ─────────────────────────────────────────────────────────────
@@ -513,6 +593,11 @@ module accelerator_top_tb;
         $display("");
         $display("==== Case 5: HW K-accumulation (P+P == 2P) ====");
         run_kaccum_check();
+
+        // ─────────── Case 6: weight reuse SKIP_W_LOAD (Phase 1a-ii-A) ───────────
+        $display("");
+        $display("==== Case 6: weight reuse (SKIP_W_LOAD) ====");
+        run_skipw_check();
 
         // ─────────── Summary ───────────
         $display("");

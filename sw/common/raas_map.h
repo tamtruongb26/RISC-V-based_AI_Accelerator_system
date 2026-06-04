@@ -58,6 +58,10 @@
 #define RAAS_CFG_ACC_ACCUM       (1u << 15)
 #define RAAS_CFG_POST_SKIP       (1u << 16)
 
+/* Phase 1a-ii: data reuse (CFG spare bit).
+ *   [17] SKIP_W_LOAD : 1 = giữ weight cũ trong array (bỏ LOAD_W), 0 = nạp weight */
+#define RAAS_CFG_SKIP_W_LOAD     (1u << 17)
+
 #define RAAS_CFG_ACT_BYPASS      (0u << RAAS_CFG_ACT_SHIFT)
 #define RAAS_CFG_ACT_RELU        (1u << RAAS_CFG_ACT_SHIFT)
 #define RAAS_CFG_ACT_SIGMOID     (2u << RAAS_CFG_ACT_SHIFT)

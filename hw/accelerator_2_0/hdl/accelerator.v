@@ -72,6 +72,8 @@ module accelerator #(
     // ── Phase 1a-i: HW K-accumulation control ──
     wire       acc_accum;
     wire       post_skip;
+    // ── Phase 1a-ii: data reuse control ──
+    wire       skip_w_load;
 
     // ── Phase 0 instrumentation: counter control + readback ──
     wire        cnt_clear;
@@ -142,6 +144,7 @@ module accelerator #(
         .po_act_mode     (act_mode),
         .po_acc_accum    (acc_accum),
         .po_post_skip    (post_skip),
+        .po_skip_w_load  (skip_w_load),
         .po_cnt_clear    (cnt_clear),
         .po_cnt_sel      (cnt_sel),
         .pi_busy         (busy),
@@ -225,6 +228,7 @@ module accelerator #(
         .pi_start             (start),
         .pi_acc_accum         (acc_accum),
         .pi_post_skip         (post_skip),
+        .pi_skip_w_load       (skip_w_load),
         .po_busy              (busy),
         .po_done              (done),
         .pi_stream_data       (stream_data),
