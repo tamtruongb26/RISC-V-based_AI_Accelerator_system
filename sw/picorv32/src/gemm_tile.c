@@ -29,6 +29,10 @@
 /* Tile size = systolic array dimension */
 #define SA 8u
 
+/* Phase 1a-ii-C: số M-tile trong 1 block (blocking). PHẢI khớp param HW
+ * control_unit NUM_SLOTS. Weight nạp 1 lần/k0, reuse qua nslots slot. */
+#define NUM_SLOTS 4u
+
 /* DMA/accel timeout */
 #define TILE_DMA_TIMEOUT    200000u
 #define TILE_ACCEL_TIMEOUT  500000u
@@ -110,40 +114,31 @@ int gemm_tiled(uint32_t a_addr, uint32_t w_addr, uint32_t b_addr,
 
     int rc;
 
-    /* Iterate over output tiles */
+    /* Iterate: n-tile → block của M-tile → K-tile → slot trong block.
+     *
+     * Phase 1a-ii-C blocking (weight-stationary):
+     *   - Mỗi k0 nạp weight W[k0,n0] 1 lần (slot 0); các slot sau reuse
+     *     (SKIP_W_LOAD, KHÔNG push weight) → cắt DDR weight ~nslots× (Conv).
+     *   - psum cộng dồn ở 40-bit trong accelerator, vào slot riêng (ACC_SLOT).
+     *   - K-tile cuối: post_proc (+bias +act) + send cho từng slot → C.
+     *   - K-accumulation (1a-i): k0==0 ghi đè, k0>0 cộng dồn. */
     for (uint32_t n0 = 0; n0 < N; n0 += SA) {
         uint32_t n_size = umin(SA, N - n0);
 
-        for (uint32_t m0 = 0; m0 < M; m0 += SA) {
-            uint32_t m_size = umin(SA, M - m0);
+        for (uint32_t m_blk = 0; m_blk < M; m_blk += SA * NUM_SLOTS) {
+            uint32_t blk_rows = umin(SA * NUM_SLOTS, M - m_blk);
+            uint32_t nslots   = (blk_rows + SA - 1u) / SA;   /* M-tile trong block */
 
-            /* ── K-tile loop: HW K-accumulation (Phase 1a-i) ──────────
-             * Bỏ K-accumulation SW. psum cộng dồn ở 40-bit TRONG accelerator
-             * (full precision, scale 1 lần ở post_proc K-tile cuối) → chính xác
-             * hơn path SW cũ (scale+saturate mỗi tile rồi cộng).
-             * Bias + activation áp bởi HW post_proc CHỈ ở K-tile cuối.
-             *   k0==0      → ghi đè psum_buf (flags không ACC_ACCUM)
-             *   k0>0       → cộng dồn (ACC_ACCUM)
-             *   !last_k    → POST_SKIP (không post_proc/send, không nhận output)
-             *   last_k     → post_proc (+bias +act) + send → nhận output về C */
             for (uint32_t k0 = 0; k0 < K; k0 += SA) {
                 uint32_t k_size = umin(SA, K - k0);
                 uint32_t last_k = (k0 + SA >= K);
 
-                uint32_t flags = (k0 == 0 ? 0u : RAAS_CFG_ACC_ACCUM)
-                               | (last_k  ? 0u : RAAS_CFG_POST_SKIP);
-                uint32_t this_act = last_k ? act_mode : RAAS_CFG_ACT_BYPASS;
-
-                /* 1. Weight tile W[k0:+k_size, n0:+n_size] */
+                /* Weight tile W[k0,n0] — chung cho mọi slot trong block,
+                 * nạp staging 1 lần (push chỉ ở slot 0). */
                 copy_sub_to_tile(w_addr + (k0 * N + n0) * 2u, N,
                                  tile_w, k_size, n_size);
 
-                /* 2. Input tile A[m0:+m_size, k0:+k_size] */
-                copy_sub_to_tile(a_addr + (m0 * K + k0) * 2u, K,
-                                 tile_in, m_size, k_size);
-
-                /* 3. Bias: chỉ K-tile cuối gửi bias thật (post_proc dùng);
-                 *    K-tile giữa gửi zeros (không post_proc nên không dùng). */
+                /* Bias tile (chỉ dùng ở K-tile cuối) */
                 tile_clear(tile_b, 4u);
                 if (last_k && b_addr != 0u) {
                     for (uint32_t c = 0; c < n_size; c++) {
@@ -152,45 +147,59 @@ int gemm_tiled(uint32_t a_addr, uint32_t w_addr, uint32_t b_addr,
                     }
                 }
 
-                /* 4. Reset DMA + configure + start (kèm flags K-acc) */
-                dma_reset();
-                accel_configure_and_start_flags(SA, SA, SA, this_act, flags);
+                for (uint32_t s = 0; s < nslots; s++) {
+                    uint32_t m0      = m_blk + s * SA;
+                    uint32_t m_size  = umin(SA, M - m0);
+                    uint32_t reuse_w = (s != 0u);   /* slot 0 nạp W, sau reuse */
 
-                /* 5. Chỉ K-tile cuối mới có output → arm S2MM (128 bytes) */
-                if (last_k)
-                    dma_s2mm_recv(tile_out, SA * SA * 2u / 2u * 2u);
+                    uint32_t flags = (k0 == 0u ? 0u : RAAS_CFG_ACC_ACCUM)
+                                   | (last_k    ? 0u : RAAS_CFG_POST_SKIP)
+                                   | (reuse_w   ? RAAS_CFG_SKIP_W_LOAD : 0u)
+                                   | RAAS_CFG_ACC_SLOT(s);
+                    uint32_t this_act = last_k ? act_mode : RAAS_CFG_ACT_BYPASS;
 
-                /* 6. Stream weights → bias → input via MM2S */
-                rc = dma_mm2s_send_and_wait(tile_w, SA * (SA / 2u) * 4u,
-                                            TILE_DMA_TIMEOUT);
-                if (rc < 0) return rc;
-                rc = dma_mm2s_send_and_wait(tile_b, (SA / 2u) * 4u,
-                                            TILE_DMA_TIMEOUT);
-                if (rc < 0) return rc;
-                rc = dma_mm2s_send_and_wait(tile_in, SA * (SA / 2u) * 4u,
-                                            TILE_DMA_TIMEOUT);
-                if (rc < 0) return rc;
+                    /* Input tile A[m0:+m_size, k0:+k_size] (riêng mỗi slot) */
+                    copy_sub_to_tile(a_addr + (m0 * K + k0) * 2u, K,
+                                     tile_in, m_size, k_size);
 
-                /* 7. Wait accelerator DONE */
-                rc = accel_wait_done(TILE_ACCEL_TIMEOUT);
-                if (rc < 0) return rc;
+                    dma_reset();
+                    accel_configure_and_start_flags(SA, SA, SA, this_act, flags);
 
-                /* 8. K-tile cuối: nhận output (đã +bias +activation bởi HW) → C
-                 *    Ghi thẳng, KHÔNG cộng dồn SW (HW đã làm). */
-                if (last_k) {
-                    rc = dma_s2mm_wait(TILE_DMA_TIMEOUT);
+                    if (last_k)
+                        dma_s2mm_recv(tile_out, SA * SA * 2u / 2u * 2u);
+
+                    /* Weight chỉ push khi KHÔNG reuse (slot 0). reuse →
+                     * accelerator skip LOAD_W nên tuyệt đối không push weight. */
+                    if (!reuse_w) {
+                        rc = dma_mm2s_send_and_wait(tile_w, SA * (SA / 2u) * 4u,
+                                                    TILE_DMA_TIMEOUT);
+                        if (rc < 0) return rc;
+                    }
+                    rc = dma_mm2s_send_and_wait(tile_b, (SA / 2u) * 4u,
+                                                TILE_DMA_TIMEOUT);
                     if (rc < 0) return rc;
-                    for (uint32_t r = 0; r < m_size; r++) {
-                        for (uint32_t c = 0; c < n_size; c++) {
-                            uint32_t to = (r * SA + c) * 2u;
-                            uint32_t co = ((m0 + r) * N + (n0 + c)) * 2u;
-                            ddr_write16(c_addr + co, ddr_read16(tile_out + to));
+                    rc = dma_mm2s_send_and_wait(tile_in, SA * (SA / 2u) * 4u,
+                                                TILE_DMA_TIMEOUT);
+                    if (rc < 0) return rc;
+
+                    rc = accel_wait_done(TILE_ACCEL_TIMEOUT);
+                    if (rc < 0) return rc;
+
+                    /* K-tile cuối: nhận output (đã +bias +act) → C[m0,n0] */
+                    if (last_k) {
+                        rc = dma_s2mm_wait(TILE_DMA_TIMEOUT);
+                        if (rc < 0) return rc;
+                        for (uint32_t r = 0; r < m_size; r++) {
+                            for (uint32_t c = 0; c < n_size; c++) {
+                                uint32_t to = (r * SA + c) * 2u;
+                                uint32_t co = ((m0 + r) * N + (n0 + c)) * 2u;
+                                ddr_write16(c_addr + co, ddr_read16(tile_out + to));
+                            }
                         }
                     }
-                }
+                } /* end slot loop */
             } /* end k_tile loop */
-
-        } /* end m_tile loop */
+        } /* end m_block loop */
     } /* end n_tile loop */
 
     return 0;
