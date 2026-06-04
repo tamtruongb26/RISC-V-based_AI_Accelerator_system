@@ -46,6 +46,9 @@ hw/**/sim_projects/
 # Build artifacts (centralized outputs)
 build/
 
+# Archive: phần không còn dùng, gom lại cho workspace gọn (có thể xoá để lấy lại disk)
+archive/
+
 
 # ==========================================
 # 3. Software / Firmware (C/C++ cho RISC-V)
