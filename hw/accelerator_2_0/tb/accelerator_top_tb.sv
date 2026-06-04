@@ -234,13 +234,13 @@ module accelerator_top_tb;
         capture_reset  = 1'b0;
         capture_enable = 1'b1;
 
-        // ── 1. AXI-Lite config ──
-        axi_lite_write(5'h00, M_used);
-        axi_lite_write(5'h04, K_used);
-        axi_lite_write(5'h08, N_used);
-
-        // ── 2. START + ACT_MODE (CONTROL = {act[1:0], 1'b1}) ──
-        axi_lite_write(5'h0C, {29'd0, act_mode[1:0], 1'b1});
+        // ── 1+2. AXI-Lite config + start, packed CONFIG (Phase 0 layout) ──
+        //   0x00 CFG: [3:0]=M [7:4]=K [11:8]=N [13:12]=ACT [14]=START(one-shot)
+        axi_lite_write(5'h00, (M_used    & 32'hF)
+                            | ((K_used   & 32'hF) << 4)
+                            | ((N_used   & 32'hF) << 8)
+                            | ((act_mode & 32'h3) << 12)
+                            | (32'h1 << 14));
 
         // ── 3. Drive AXIS slave: weights 32 word + bias 4 word + input ──
         // Weights: 8 rows × 4 word/row, even/odd packing
@@ -267,7 +267,7 @@ module accelerator_top_tb;
         timeout = 0;
         status  = 32'h0;
         while (!status[1] && timeout < 2000) begin
-            axi_lite_read(5'h10, status);
+            axi_lite_read(5'h0C, status);   // STATUS dời 0x10 -> 0x0C (Phase 0 pack)
             timeout = timeout + 1;
         end
         if (timeout >= 2000) begin
