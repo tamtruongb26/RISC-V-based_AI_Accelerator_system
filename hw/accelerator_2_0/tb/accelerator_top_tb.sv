@@ -632,6 +632,114 @@ module accelerator_top_tb;
     endtask
 
     // ─────────────────────────────────────────────────────────────
+    // Case 8: full blocking (Phase 1a-ii-C) — blocking == simple K-acc
+    //   GEMM 2 M-tile × K=16 (2 K-tile) × N=8. 2 đường tính cùng kết quả:
+    //   (1) blocking: W reuse qua 2 slot, K-acc vào từng slot, output cuối K.
+    //   (2) simple: từng M-tile, K-acc slot0, no reuse (đã verify ở Case 5).
+    //   Tổ hợp K-acc + slot + skip_w cùng lúc = phần chưa test chung.
+    // ─────────────────────────────────────────────────────────────
+    reg [15:0] Wfull  [0:127];   // 16 K × 8 N  (k*8 + n)
+    reg [15:0] Afull0 [0:127];   // slot0: 8 M × 16 K (m*16 + k)
+    reg [15:0] Afull1 [0:127];
+
+    task automatic ld_W(input integer k0);          // W_mem ← Wfull[k0..k0+7]
+        integer k, n;
+        for (k = 0; k < 8; k = k + 1)
+            for (n = 0; n < 8; n = n + 1)
+                W_mem[k*8 + n] = Wfull[(k0 + k)*8 + n];
+    endtask
+    task automatic ld_A(input integer sel, input integer k0);  // A_mem ← Afull[sel] cols k0..k0+7
+        integer m, k;
+        for (m = 0; m < 8; m = m + 1)
+            for (k = 0; k < 8; k = k + 1)
+                A_mem[m*8 + k] = (sel == 0) ? Afull0[m*16 + k0 + k]
+                                            : Afull1[m*16 + k0 + k];
+    endtask
+
+    task automatic run_block_check();
+        integer m, k, n, i, nw, local_errs;
+        reg [31:0] c0_blk [0:63];
+        reg [31:0] c1_blk [0:63];
+        reg [31:0] cfg;
+
+        for (i = 0; i < 8; i = i + 1) bias_mem[i] = 16'h0;
+        for (k = 0; k < 16; k = k + 1) for (n = 0; n < 8; n = n + 1)
+            Wfull[k*8 + n] = 16'h0020 + k*16'h0004 + n;
+        for (m = 0; m < 8; m = m + 1) for (k = 0; k < 16; k = k + 1) begin
+            Afull0[m*16 + k] = 16'h0040 + m*16'h0008 + k;
+            Afull1[m*16 + k] = 16'h0030 + m*16'h0004 + k;
+        end
+        nw  = 8 * ((8 + 1) >> 1);            // 8 × 4 = 32 word
+        cfg = (8 & 32'hF) | ((8 & 32'hF) << 4) | ((8 & 32'hF) << 8);
+
+        // ── Đường 1: BLOCKING (2 slot, reuse W) ──
+        reset_dut();
+        @(negedge clk); capture_enable = 1'b0; capture_reset = 1'b1;
+        @(posedge clk); @(negedge clk); capture_reset = 1'b0;
+        // k0=0: slot0 load W, slot1 reuse W (both overwrite, post_skip)
+        ld_W(0);  ld_A(0, 0);
+        axi_lite_write(5'h00, cfg | (32'h1<<14) | (32'h1<<16) | (32'd0<<18));
+        push_tile(8, 8); wait_done("blk.k0s0");
+        ld_A(1, 0);
+        axi_lite_write(5'h00, cfg | (32'h1<<14) | (32'h1<<16) | (32'h1<<17) | (32'd1<<18));
+        push_bias_input(8, 8); wait_done("blk.k0s1");
+        // k0=8 (last): slot0 load W[8] accum+post→out; slot1 reuse accum+post→out
+        ld_W(8);  ld_A(0, 8);
+        @(negedge clk); capture_reset = 1'b1; @(posedge clk); @(negedge clk);
+        capture_reset = 1'b0; capture_enable = 1'b1;
+        axi_lite_write(5'h00, cfg | (32'h1<<14) | (32'h1<<15) | (32'd0<<18));
+        push_tile(8, 8); wait_done("blk.k1s0");
+        @(posedge clk); capture_enable = 1'b0;
+        for (i = 0; i < nw; i = i + 1) c0_blk[i] = capture_buf[i];
+        ld_A(1, 8);
+        @(negedge clk); capture_reset = 1'b1; @(posedge clk); @(negedge clk);
+        capture_reset = 1'b0; capture_enable = 1'b1;
+        axi_lite_write(5'h00, cfg | (32'h1<<14) | (32'h1<<15) | (32'h1<<17) | (32'd1<<18));
+        push_bias_input(8, 8); wait_done("blk.k1s1");
+        @(posedge clk); capture_enable = 1'b0;
+        for (i = 0; i < nw; i = i + 1) c1_blk[i] = capture_buf[i];
+
+        // ── Đường 2: SIMPLE K-acc (slot0, no reuse), so sánh ──
+        local_errs = 0;
+        // slot0 data → c0_smp
+        reset_dut();
+        ld_W(0); ld_A(0, 0);
+        axi_lite_write(5'h00, cfg | (32'h1<<14) | (32'h1<<16));
+        push_tile(8, 8); wait_done("smp.k0");
+        ld_W(8); ld_A(0, 8);
+        @(negedge clk); capture_reset = 1'b1; @(posedge clk); @(negedge clk);
+        capture_reset = 1'b0; capture_enable = 1'b1;
+        axi_lite_write(5'h00, cfg | (32'h1<<14) | (32'h1<<15));
+        push_tile(8, 8); wait_done("smp.k1");
+        @(posedge clk); capture_enable = 1'b0;
+        for (i = 0; i < nw; i = i + 1)
+            if (c0_blk[i] !== capture_buf[i]) begin
+                $display("[FAIL] block slot0 word %0d: blk=0x%h smp=0x%h", i, c0_blk[i], capture_buf[i]);
+                local_errs = local_errs + 1;
+            end
+        // slot1 data → c1_smp
+        reset_dut();
+        ld_W(0); ld_A(1, 0);
+        axi_lite_write(5'h00, cfg | (32'h1<<14) | (32'h1<<16));
+        push_tile(8, 8); wait_done("smp.k0b");
+        ld_W(8); ld_A(1, 8);
+        @(negedge clk); capture_reset = 1'b1; @(posedge clk); @(negedge clk);
+        capture_reset = 1'b0; capture_enable = 1'b1;
+        axi_lite_write(5'h00, cfg | (32'h1<<14) | (32'h1<<15));
+        push_tile(8, 8); wait_done("smp.k1b");
+        @(posedge clk); capture_enable = 1'b0;
+        for (i = 0; i < nw; i = i + 1)
+            if (c1_blk[i] !== capture_buf[i]) begin
+                $display("[FAIL] block slot1 word %0d: blk=0x%h smp=0x%h", i, c1_blk[i], capture_buf[i]);
+                local_errs = local_errs + 1;
+            end
+
+        if (local_errs == 0)
+            $display("[ OK ] blocking: 2-slot W-reuse K-acc == simple K-acc (%0d words×2)", nw);
+        errs = errs + local_errs;
+    endtask
+
+    // ─────────────────────────────────────────────────────────────
     // Main stimulus
     // ─────────────────────────────────────────────────────────────
     initial begin
@@ -699,6 +807,11 @@ module accelerator_top_tb;
         $display("");
         $display("==== Case 7: accumulator slot independence ====");
         run_slot_check();
+
+        // ─────────── Case 8: full blocking (Phase 1a-ii-C) ───────────
+        $display("");
+        $display("==== Case 8: blocking (W-reuse + K-acc + slots) ====");
+        run_block_check();
 
         // ─────────── Summary ───────────
         $display("");
