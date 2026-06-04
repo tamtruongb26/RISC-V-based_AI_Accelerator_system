@@ -51,6 +51,13 @@
 #define RAAS_CFG_ACT_SHIFT       12u
 #define RAAS_CFG_START_BIT       (1u << 14)
 
+/* Phase 1a-i: HW K-accumulation control (CFG spare bit).
+ *   [15] ACC_ACCUM : 1 = cộng dồn psum_buf (K-tile > 0), 0 = ghi đè (K-tile 0)
+ *   [16] POST_SKIP : 1 = bỏ POST_PROC+SEND (K-tile giữa), 0 = làm (K-tile cuối)
+ * Mặc định (bit=0) = behavior cũ (ghi đè + post_proc). */
+#define RAAS_CFG_ACC_ACCUM       (1u << 15)
+#define RAAS_CFG_POST_SKIP       (1u << 16)
+
 #define RAAS_CFG_ACT_BYPASS      (0u << RAAS_CFG_ACT_SHIFT)
 #define RAAS_CFG_ACT_RELU        (1u << RAAS_CFG_ACT_SHIFT)
 #define RAAS_CFG_ACT_SIGMOID     (2u << RAAS_CFG_ACT_SHIFT)

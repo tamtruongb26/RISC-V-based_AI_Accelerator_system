@@ -43,6 +43,14 @@ void accel_configure_and_start(uint32_t M, uint32_t K, uint32_t N, uint32_t act_
     fence_iorw();
 }
 
+void accel_configure_and_start_flags(uint32_t M, uint32_t K, uint32_t N,
+                                     uint32_t act_mode, uint32_t flags)
+{
+    accel_write(RAAS_ACCEL_CFG,
+                RAAS_CFG_PACK(M, K, N, act_mode) | RAAS_CFG_START_BIT | flags);
+    fence_iorw();
+}
+
 /* ── Status polling ────────────────────────────────────────────────────── */
 
 int accel_wait_done(uint32_t timeout_cycles)

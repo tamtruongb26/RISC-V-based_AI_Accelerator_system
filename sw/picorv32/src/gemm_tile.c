@@ -117,111 +117,78 @@ int gemm_tiled(uint32_t a_addr, uint32_t w_addr, uint32_t b_addr,
         for (uint32_t m0 = 0; m0 < M; m0 += SA) {
             uint32_t m_size = umin(SA, M - m0);
 
-            /* ── Zero the accumulator for this (m,n) output tile ──── */
-            /* We accumulate in the output area of DDR directly.
-             * Clear the sub-block C[m0..m0+m_size, n0..n0+n_size]. */
-            for (uint32_t r = 0; r < m_size; r++) {
-                for (uint32_t c = 0; c < n_size; c++) {
-                    uint32_t out_off = ((m0 + r) * N + (n0 + c)) * 2u;
-                    ddr_write16(c_addr + out_off, 0);
-                }
-            }
-
-            /* ── K-tile loop: accumulate partial GEMMs ──────────── */
+            /* ── K-tile loop: HW K-accumulation (Phase 1a-i) ──────────
+             * Bỏ K-accumulation SW. psum cộng dồn ở 40-bit TRONG accelerator
+             * (full precision, scale 1 lần ở post_proc K-tile cuối) → chính xác
+             * hơn path SW cũ (scale+saturate mỗi tile rồi cộng).
+             * Bias + activation áp bởi HW post_proc CHỈ ở K-tile cuối.
+             *   k0==0      → ghi đè psum_buf (flags không ACC_ACCUM)
+             *   k0>0       → cộng dồn (ACC_ACCUM)
+             *   !last_k    → POST_SKIP (không post_proc/send, không nhận output)
+             *   last_k     → post_proc (+bias +act) + send → nhận output về C */
             for (uint32_t k0 = 0; k0 < K; k0 += SA) {
                 uint32_t k_size = umin(SA, K - k0);
+                uint32_t last_k = (k0 + SA >= K);
 
-                /* 1. Copy sub-weight W[k0:+k_size, n0:+n_size] → tile_w
-                 *    W is [K × N] row-major. */
+                uint32_t flags = (k0 == 0 ? 0u : RAAS_CFG_ACC_ACCUM)
+                               | (last_k  ? 0u : RAAS_CFG_POST_SKIP);
+                uint32_t this_act = last_k ? act_mode : RAAS_CFG_ACT_BYPASS;
+
+                /* 1. Weight tile W[k0:+k_size, n0:+n_size] */
                 copy_sub_to_tile(w_addr + (k0 * N + n0) * 2u, N,
                                  tile_w, k_size, n_size);
 
-                /* 2. Copy sub-input A[m0:+m_size, k0:+k_size] → tile_in
-                 *    A is [M × K] row-major. */
+                /* 2. Input tile A[m0:+m_size, k0:+k_size] */
                 copy_sub_to_tile(a_addr + (m0 * K + k0) * 2u, K,
                                  tile_in, m_size, k_size);
 
-                /* 3. Bias = zeros (we add bias in software after all K) */
+                /* 3. Bias: chỉ K-tile cuối gửi bias thật (post_proc dùng);
+                 *    K-tile giữa gửi zeros (không post_proc nên không dùng). */
                 tile_clear(tile_b, 4u);
+                if (last_k && b_addr != 0u) {
+                    for (uint32_t c = 0; c < n_size; c++) {
+                        int16_t bv = ddr_read16(b_addr + (n0 + c) * 2u);
+                        ddr_write16(tile_b + c * 2u, bv);
+                    }
+                }
 
-                /* 4. Reset DMA for this tile */
+                /* 4. Reset DMA + configure + start (kèm flags K-acc) */
                 dma_reset();
+                accel_configure_and_start_flags(SA, SA, SA, this_act, flags);
 
-                /* 5. Configure accelerator */
-                accel_configure(SA, SA, SA, RAAS_CFG_ACT_BYPASS);
-                accel_start();
+                /* 5. Chỉ K-tile cuối mới có output → arm S2MM (128 bytes) */
+                if (last_k)
+                    dma_s2mm_recv(tile_out, SA * SA * 2u / 2u * 2u);
 
-                /* 6. Arm S2MM to receive output */
-                dma_s2mm_recv(tile_out, SA * SA * 2u / 2u * 2u);
-                /* = 8×8 elements × 2 bytes / 2 per word × 4 bytes = 128 bytes */
-
-                /* 7. Stream weights → bias → input via MM2S */
-                /* Weights: 8 rows × ceil(8/2) words × 4 bytes = 128 bytes */
+                /* 6. Stream weights → bias → input via MM2S */
                 rc = dma_mm2s_send_and_wait(tile_w, SA * (SA / 2u) * 4u,
                                             TILE_DMA_TIMEOUT);
                 if (rc < 0) return rc;
-
-                /* Bias: ceil(8/2) words × 4 bytes = 16 bytes */
                 rc = dma_mm2s_send_and_wait(tile_b, (SA / 2u) * 4u,
                                             TILE_DMA_TIMEOUT);
                 if (rc < 0) return rc;
-
-                /* Input: 8 rows × ceil(8/2) words × 4 bytes = 128 bytes */
                 rc = dma_mm2s_send_and_wait(tile_in, SA * (SA / 2u) * 4u,
                                             TILE_DMA_TIMEOUT);
                 if (rc < 0) return rc;
 
-                /* 8. Wait accelerator DONE */
+                /* 7. Wait accelerator DONE */
                 rc = accel_wait_done(TILE_ACCEL_TIMEOUT);
                 if (rc < 0) return rc;
 
-                /* 9. Wait S2MM done */
-                rc = dma_s2mm_wait(TILE_DMA_TIMEOUT);
-                if (rc < 0) return rc;
-
-                /* 10. Accumulate tile output into C[m0..., n0...]
-                 *     Read from tile_out, add to C. */
-                for (uint32_t r = 0; r < m_size; r++) {
-                    for (uint32_t c = 0; c < n_size; c++) {
-                        uint32_t to = (r * SA + c) * 2u;
-                        int16_t partial = ddr_read16(tile_out + to);
-
-                        uint32_t co = ((m0 + r) * N + (n0 + c)) * 2u;
-                        int16_t acc = ddr_read16(c_addr + co);
-
-                        /* Q1.4.11 saturating add */
-                        int32_t sum = (int32_t)acc + (int32_t)partial;
-                        if (sum > 32767) sum = 32767;
-                        if (sum < -32768) sum = -32768;
-
-                        ddr_write16(c_addr + co, (int16_t)sum);
+                /* 8. K-tile cuối: nhận output (đã +bias +activation bởi HW) → C
+                 *    Ghi thẳng, KHÔNG cộng dồn SW (HW đã làm). */
+                if (last_k) {
+                    rc = dma_s2mm_wait(TILE_DMA_TIMEOUT);
+                    if (rc < 0) return rc;
+                    for (uint32_t r = 0; r < m_size; r++) {
+                        for (uint32_t c = 0; c < n_size; c++) {
+                            uint32_t to = (r * SA + c) * 2u;
+                            uint32_t co = ((m0 + r) * N + (n0 + c)) * 2u;
+                            ddr_write16(c_addr + co, ddr_read16(tile_out + to));
+                        }
                     }
                 }
             } /* end k_tile loop */
-
-            /* ── Post K-accumulation: add bias + activation ────── */
-            for (uint32_t r = 0; r < m_size; r++) {
-                for (uint32_t c = 0; c < n_size; c++) {
-                    uint32_t co = ((m0 + r) * N + (n0 + c)) * 2u;
-                    int32_t val = (int32_t)ddr_read16(c_addr + co);
-
-                    /* Add bias (once, after all K-tiles) */
-                    if (b_addr != 0u) {
-                        int16_t bias_val = ddr_read16(b_addr + (n0 + c) * 2u);
-                        val += (int32_t)bias_val;
-                    }
-
-                    /* Saturate */
-                    if (val > 32767) val = 32767;
-                    if (val < -32768) val = -32768;
-
-                    /* Activation */
-                    if (act_mode == RAAS_CFG_ACT_RELU && val < 0)
-                        val = 0;
-
-                    ddr_write16(c_addr + co, (int16_t)val);
-                }
-            }
 
         } /* end m_tile loop */
     } /* end n_tile loop */

@@ -39,6 +39,12 @@ void accel_start(void);
  * MMIO overhead ~6× so với cách cũ. Khuyến nghị dùng cái này trong hot loop. */
 void accel_configure_and_start(uint32_t M, uint32_t K, uint32_t N, uint32_t act_mode);
 
+/* Như trên nhưng OR thêm flags (RAAS_CFG_ACC_ACCUM / RAAS_CFG_POST_SKIP) cho
+ * HW K-accumulation. K-tile 0: flags=0; K-tile>0: ACC_ACCUM; K-tile không-cuối
+ * thêm POST_SKIP. */
+void accel_configure_and_start_flags(uint32_t M, uint32_t K, uint32_t N,
+                                     uint32_t act_mode, uint32_t flags);
+
 /* ── Status polling ────────────────────────────────────────────────────── */
 
 /* Poll STATUS.DONE bit cho đến khi set, hoặc timeout.
