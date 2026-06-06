@@ -39,6 +39,10 @@ module accelerator_slave_lite_v2_0_S00_AXI #(
     output wire         po_skip_w_load, // slv_reg0[17] 1=giữ weight cũ (bỏ LOAD_W)
     output wire [1:0]   po_acc_slot,    // slv_reg0[19:18] output-tile slot (blocking)
     output wire         po_skip_in_load,// slv_reg0[20] 1=giữ input cũ (bỏ LOAD_IN)
+    // ── Phase 2a: HW im2col mode + config (CFG bit 21 + 2 packed registers) ──
+    output wire         po_im2col_mode, // slv_reg0[21] 1=chế độ im2col (thay GEMM)
+    output wire [31:0]  po_im2col_cfg0, // 0x14: {H[7:0],W[7:0],C[7:0],KH[3:0],KW[3:0]}
+    output wire [31:0]  po_im2col_cfg1, // 0x18: {Hout[7:0],Wout[7:0],stride[3:0],pad[3:0]}
     // ── User-side inputs (từ control_unit/data_path) ──
     input  wire         pi_busy,
     input  wire         pi_done,
@@ -95,6 +99,8 @@ module accelerator_slave_lite_v2_0_S00_AXI #(
     reg [C_S_AXI_DATA_WIDTH-1:0] slv_reg0;  // CONFIG_PACKED
     reg [C_S_AXI_DATA_WIDTH-1:0] slv_reg1;  // CNT_CLEAR
     reg [C_S_AXI_DATA_WIDTH-1:0] slv_reg2;  // CNT_SEL
+    reg [C_S_AXI_DATA_WIDTH-1:0] slv_reg5;  // IM2COL_CFG0 (0x14)
+    reg [C_S_AXI_DATA_WIDTH-1:0] slv_reg6;  // IM2COL_CFG1 (0x18)
     // DONE sticky: latch on pi_done pulse, clear on next START write
     reg                          done_sticky;
     wire [C_S_AXI_DATA_WIDTH-1:0] slv_reg3 = {30'd0, done_sticky, pi_busy};  // STATUS (HW)
@@ -177,6 +183,8 @@ module accelerator_slave_lite_v2_0_S00_AXI #(
             slv_reg0 <= {C_S_AXI_DATA_WIDTH{1'b0}};
             slv_reg1 <= {C_S_AXI_DATA_WIDTH{1'b0}};
             slv_reg2 <= {C_S_AXI_DATA_WIDTH{1'b0}};
+            slv_reg5 <= {C_S_AXI_DATA_WIDTH{1'b0}};
+            slv_reg6 <= {C_S_AXI_DATA_WIDTH{1'b0}};
         end else begin
             // Auto-clear START bit (one-shot pulse) - slv_reg0[14]
             if (slv_reg0[14]) slv_reg0[14] <= 1'b0;
@@ -197,6 +205,12 @@ module accelerator_slave_lite_v2_0_S00_AXI #(
                               if (S_AXI_WSTRB[byte_index])
                                   slv_reg2[byte_index*8 +: 8] <= S_AXI_WDATA[byte_index*8 +: 8];
                     // 3'h3 = STATUS read-only, 3'h4 = CNT_VAL read-only
+                    3'h5: for (byte_index = 0; byte_index < 4; byte_index = byte_index + 1)
+                              if (S_AXI_WSTRB[byte_index])
+                                  slv_reg5[byte_index*8 +: 8] <= S_AXI_WDATA[byte_index*8 +: 8];
+                    3'h6: for (byte_index = 0; byte_index < 4; byte_index = byte_index + 1)
+                              if (S_AXI_WSTRB[byte_index])
+                                  slv_reg6[byte_index*8 +: 8] <= S_AXI_WDATA[byte_index*8 +: 8];
                     default: ;
                 endcase
             end
@@ -260,6 +274,8 @@ module accelerator_slave_lite_v2_0_S00_AXI #(
         (axi_araddr[ADDR_LSB+OPT_MEM_ADDR_BITS:ADDR_LSB] == 3'h2) ? slv_reg2 :
         (axi_araddr[ADDR_LSB+OPT_MEM_ADDR_BITS:ADDR_LSB] == 3'h3) ? slv_reg3 :
         (axi_araddr[ADDR_LSB+OPT_MEM_ADDR_BITS:ADDR_LSB] == 3'h4) ? slv_reg4 :
+        (axi_araddr[ADDR_LSB+OPT_MEM_ADDR_BITS:ADDR_LSB] == 3'h5) ? slv_reg5 :
+        (axi_araddr[ADDR_LSB+OPT_MEM_ADDR_BITS:ADDR_LSB] == 3'h6) ? slv_reg6 :
         {C_S_AXI_DATA_WIDTH{1'b0}};
 
     // ─────────────────────────────────────────────────────────
@@ -285,6 +301,10 @@ module accelerator_slave_lite_v2_0_S00_AXI #(
     assign po_acc_slot    = slv_reg0[19:18];
     //   slv_reg0[20] = SKIP_IN_LOAD (1=giữ input trong input_buf, bỏ LOAD_IN)
     assign po_skip_in_load = slv_reg0[20];
+    //   slv_reg0[21] = IM2COL_MODE; cfg0/cfg1 = im2col params packed
+    assign po_im2col_mode = slv_reg0[21];
+    assign po_im2col_cfg0 = slv_reg5;
+    assign po_im2col_cfg1 = slv_reg6;
     assign po_cnt_clear   = slv_reg1[0];
     assign po_cnt_sel     = slv_reg2[3:0];
 
