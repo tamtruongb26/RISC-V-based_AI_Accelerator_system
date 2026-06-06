@@ -51,6 +51,12 @@ area/timing bằng OOC synth; firmware compile-verify). Chi tiết: `docs/innova
   - [ ] Integration vào accelerator thật (FSM state TMR, scratchpad ECC) + `fault_sweep.py` → 4 resilience curve
 - [x] **Phase 2b — HW maxpool** (`maxpool2x2.v`, Vấn đề 3c) — module verified sim
       (4 case signed, multi-channel); integration (POOL mode) chưa
+- [x] **Phase 3a — OS dataflow** (`os_array.v`, Vấn đề 1: FC underutilization) — END-TO-END:
+  - [x] `os_array.v` engine (64 MAC/cycle, K→hàng N→cột) + unit sim
+  - [x] OS_MODE (CFG[22]) integration: states OS_LOAD_W/A/FEED/DRAIN + os_array trong
+        control_unit; verify OS(M=1)==WS(M=1) + OS 2-K-tile==WS K-accum (sim)
+  - [x] Firmware `gemm_os` + `fc_os` (SW bias+relu); FC1/2/3 dùng OS; build clean
+  - FC util 12.5%→100% (64/64 PE thay 8/64). Speedup cần board đo.
 
 ### Phase 0 — Đã hoàn thành
 
@@ -100,7 +106,6 @@ area/timing bằng OOC synth; firmware compile-verify). Chi tiết: `docs/innova
 - [ ] Phase 1b — Double buffering (overlap 2-lane; foundation đã xong)
 - [ ] Phase 2b — HW pool (cần line-buffer cửa sổ 2×2)
 - [ ] Phase 2c — CISC loop descriptor (autonomy — T2, đụng block design)
-- [ ] Phase 3a — OS dataflow mode (FC 12.5%→80%)
 - [ ] Phase 5 integration — wire reliability primitives vào accelerator → 4 resilience curve
 - [ ] Sparsity skip counter (data_path + SPARSITY_SKIPPED reg) + SAIF power measure
 - [ ] Phase 6 — Generic firmware + model descriptor
@@ -117,7 +122,7 @@ area/timing bằng OOC synth; firmware compile-verify). Chi tiết: `docs/innova
 | 2a — HW im2col | 7-8 | `im2col.v` | **✅ DONE** (sim+synth+firmware, blocking, `v-phase2a`) |
 | 2b — HW pool | 9 | `maxpool2x2.v` | **✅ module** (sim 4 case signed); integration chưa |
 | 2c — CISC loop descriptor | 10-11 | Outer loop FSM | Chưa bắt đầu (autonomy — đụng BD) |
-| 3a — OS dataflow mode | 12-14 | `pe.v`, `data_path.v` dual-mode | Chưa bắt đầu |
+| 3a — OS dataflow mode | 12-14 | `os_array.v` + OS_MODE | **✅ DONE end-to-end** (engine+integration+firmware; OS==WS sim; FC util 12.5%→100%) |
 | 4 — Sparsity zero-skip | 15 | `pe.v` operand isolation | **✅ DONE** (functional preserved; power cần SAIF) |
 | 5a — Fault injection framework | 16 | `fault_injector.v` | **✅ module** (sim); integration chưa |
 | 5b — TMR control FSM | 17 | `tmr_voter.v` | **✅ module** (sim); integration chưa |
