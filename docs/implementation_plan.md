@@ -39,6 +39,13 @@ area/timing bằng OOC synth; firmware compile-verify). Chi tiết: `docs/innova
   - [x] Firmware `im2col_hw()` + lenet.c (compile pass)
   - [x] OOC synth: LUT 20%, FF 12.6%, DSP 72, WNS +8.39ns
 - [x] **Phase 1b foundation** — tách scratchpad FM/A (nền double-buffer; overlap 2-lane chưa làm)
+- [x] **Phase 4 — Sparsity operand isolation** (Vấn đề 5) — `pe.v`: khi a/w=0 giữ
+      operand cũ (no toggle → power), functional preserved (pe_tb pass). Mở trụ 2.
+- [x] **Phase 5 — Reliability primitives** (trụ novel) — 3 module verified sim:
+  - [x] 5a `fault_injector.v` — SEU bit-flip injection (Vấn đề 7a)
+  - [x] 5b `tmr_voter.v` — 3-input majority voter (Vấn đề 7b)
+  - [x] 5c `ecc_secded.v` — Hamming SECDED, test vét cạn 1-bit correct + 2-bit detect (Vấn đề 7c)
+  - [ ] Integration (wire vào accelerator + AXI-Lite + `fault_sweep.py` → 4 resilience curve)
 
 ### Phase 0 — Đã hoàn thành
 
@@ -88,11 +95,9 @@ area/timing bằng OOC synth; firmware compile-verify). Chi tiết: `docs/innova
 - [ ] Phase 1b — Double buffering (overlap 2-lane; foundation đã xong)
 - [ ] Phase 2b — HW pool (cần line-buffer cửa sổ 2×2)
 - [ ] Phase 2c — CISC loop descriptor (autonomy — T2, đụng block design)
-- [ ] Phase 3a — OS dataflow mode
-- [ ] Phase 4 — Sparsity zero-skip
-- [ ] Phase 5a — Fault injection framework (trụ Reliability — chưa đụng)
-- [ ] Phase 5b — TMR control FSM
-- [ ] Phase 5c — ECC scratchpad
+- [ ] Phase 3a — OS dataflow mode (FC 12.5%→80%)
+- [ ] Phase 5 integration — wire reliability primitives vào accelerator → 4 resilience curve
+- [ ] Sparsity skip counter (data_path + SPARSITY_SKIPPED reg) + SAIF power measure
 - [ ] Phase 6 — Generic firmware + model descriptor
 - [ ] Phase 7 — Final evaluation + writeup
 - [ ] Đo board (latency/power/accuracy + data reuse APM) — mọi số hiệu năng
@@ -108,10 +113,10 @@ area/timing bằng OOC synth; firmware compile-verify). Chi tiết: `docs/innova
 | 2b — HW pool | 9 | `post_proc.v` extended | Chưa bắt đầu |
 | 2c — CISC loop descriptor | 10-11 | Outer loop FSM | Chưa bắt đầu (autonomy — đụng BD) |
 | 3a — OS dataflow mode | 12-14 | `pe.v`, `data_path.v` dual-mode | Chưa bắt đầu |
-| 4 — Sparsity zero-skip | 15 | `pe.v` operand isolation | Chưa bắt đầu |
-| 5a — Fault injection framework | 16 | `fault_injector.v` | Chưa bắt đầu |
-| 5b — TMR control FSM | 17 | `tmr_voter.v` | Chưa bắt đầu |
-| 5c — ECC scratchpad | 18-19 | `ecc_encoder.v`, `ecc_decoder.v` | Chưa bắt đầu |
+| 4 — Sparsity zero-skip | 15 | `pe.v` operand isolation | **✅ DONE** (functional preserved; power cần SAIF) |
+| 5a — Fault injection framework | 16 | `fault_injector.v` | **✅ module** (sim); integration chưa |
+| 5b — TMR control FSM | 17 | `tmr_voter.v` | **✅ module** (sim); integration chưa |
+| 5c — ECC scratchpad | 18-19 | `ecc_secded.v` | **✅ module** (sim vét cạn); integration chưa |
 | 6 — Generic firmware + model descriptor | 20 | `ops.c`, `main_generic.c` | Chưa bắt đầu |
 | 7 — Final evaluation + writeup | 21-22 | Ablation, comparison, luận văn | Chưa bắt đầu |
 
