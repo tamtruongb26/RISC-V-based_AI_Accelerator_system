@@ -47,6 +47,24 @@ thừa**, còn nhiều chỗ cho Phase 2-5 (gồm trụ Reliability). Đổi l�
 - → Dùng để so **tương đối** (baseline vs phase1a) + xác nhận fit/timing, không phải
   số cuối cùng cho luận văn (số cuối cần post-implementation + board).
 
+## Module area (OOC) — hardening + preprocessing overhead
+
+Script: [scripts/synth_module.tcl](../scripts/synth_module.tcl). OOC từng module.
+
+| Module | LUT | FF | DSP | BRAM | % LUT (ZU3EG) |
+|---|---|---|---|---|---|
+| `tmr_voter` (5b) | 7 | 0 | 0 | 0 | <0.01% |
+| `ecc_secded` (5c) | 20 | 0 | 0 | 0 | 0.03% |
+| `fault_injector` (5a) | 93 | 33 | 0 | 0 | 0.13% |
+| `ecc_scratchpad` (ECC mem) | 185 | 97 | 0 | 0.5 | 0.26% |
+| `maxpool2x2` (3c) | 280 | 117 | 1 | 0 | 0.40% |
+
+→ **Reliability hardening (TMR + ECC) tốn ~vài trăm LUT, <0.5% ZU3EG** — vượt xa
+tiêu chí defense "hardening overhead < 20% area". maxpool +1 DSP (mult địa chỉ).
+Primitive đều tí hon → nhân bản (TMR cho FSM state, ECC mọi scratchpad word) vẫn nhỏ.
+
+> Caveat: OOC từng module, chưa P&R; power chưa đo (cần SAIF).
+
 ## Cross-references
 - Thông số thiết kế + lý do: [phase1a_design.md](phase1a_design.md)
 - Tổng kết đổi mới: [innovations_summary.md](innovations_summary.md)
