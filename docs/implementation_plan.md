@@ -45,7 +45,12 @@ area/timing bằng OOC synth; firmware compile-verify). Chi tiết: `docs/innova
   - [x] 5a `fault_injector.v` — SEU bit-flip injection (Vấn đề 7a)
   - [x] 5b `tmr_voter.v` — 3-input majority voter (Vấn đề 7b)
   - [x] 5c `ecc_secded.v` — Hamming SECDED, test vét cạn 1-bit correct + 2-bit detect (Vấn đề 7c)
-  - [ ] Integration (wire vào accelerator + AXI-Lite + `fault_sweep.py` → 4 resilience curve)
+  - [x] `tmr_register.v` — register chịu lỗi (TMR + fault inj), demo voter mask SEU
+  - [x] `ecc_scratchpad.v` — memory chịu lỗi (ECC encode/decode + fault inj), tự sửa
+  - [x] Area OOC: hardening <0.5% LUT ZU3EG (xem `synth_results.md`) → vượt tiêu chí
+  - [ ] Integration vào accelerator thật (FSM state TMR, scratchpad ECC) + `fault_sweep.py` → 4 resilience curve
+- [x] **Phase 2b — HW maxpool** (`maxpool2x2.v`, Vấn đề 3c) — module verified sim
+      (4 case signed, multi-channel); integration (POOL mode) chưa
 
 ### Phase 0 — Đã hoàn thành
 
@@ -110,7 +115,7 @@ area/timing bằng OOC synth; firmware compile-verify). Chi tiết: `docs/innova
 | 1a — Scratchpad + Accumulator | 3-5 | `scratchpad.v`, `accumulator.v` | **✅ DONE** (sim+synth, `v-phase1a`) |
 | 1b — Double buffering | 6 | Ping-pong banks | **Foundation xong** (tách SP); overlap 2-lane chưa |
 | 2a — HW im2col | 7-8 | `im2col.v` | **✅ DONE** (sim+synth+firmware, blocking, `v-phase2a`) |
-| 2b — HW pool | 9 | `post_proc.v` extended | Chưa bắt đầu |
+| 2b — HW pool | 9 | `maxpool2x2.v` | **✅ module** (sim 4 case signed); integration chưa |
 | 2c — CISC loop descriptor | 10-11 | Outer loop FSM | Chưa bắt đầu (autonomy — đụng BD) |
 | 3a — OS dataflow mode | 12-14 | `pe.v`, `data_path.v` dual-mode | Chưa bắt đầu |
 | 4 — Sparsity zero-skip | 15 | `pe.v` operand isolation | **✅ DONE** (functional preserved; power cần SAIF) |
