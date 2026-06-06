@@ -57,6 +57,9 @@ sim-accumulator:
 sim-im2col:
 	$(call run_sim,im2col,$(HDL)/im2col.v,)
 
+sim-fault_injector:
+	$(call run_sim,fault_injector,$(HDL)/fault_injector.v,)
+
 sim-pe:
 	$(call run_sim,pe,$(HDL)/pe.v,)
 
@@ -69,7 +72,7 @@ sim-post_proc:
 sim-accelerator_top:
 	$(call run_sim,accelerator_top,$(wildcard $(HDL)/*.v),1)
 
-sim-all: sim-pe sim-data_path sim-post_proc sim-scratchpad sim-accumulator sim-im2col sim-accelerator_top
+sim-all: sim-pe sim-data_path sim-post_proc sim-scratchpad sim-accumulator sim-im2col sim-fault_injector sim-accelerator_top
 	@echo ""
 	@echo "════════════════════════════════════════════════════════════"
 	@echo " Toàn bộ unit sim Phase 0 PASS"
