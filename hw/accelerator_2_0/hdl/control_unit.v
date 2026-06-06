@@ -38,6 +38,8 @@ module control_unit #(
     input  wire                          pi_im2col_mode,
     input  wire [31:0]                   pi_im2col_cfg0,
     input  wire [31:0]                   pi_im2col_cfg1,
+    // ── Phase 3a: OS dataflow (FC) ──
+    input  wire                          pi_os_mode,
     output reg                           po_busy,
     output reg                           po_done,
 
@@ -94,26 +96,31 @@ module control_unit #(
     // ─────────────────────────────────────────────────────────────
     // FSM states
     // ─────────────────────────────────────────────────────────────
-    localparam [3:0] ST_IDLE         = 4'd0;
-    localparam [3:0] ST_LOAD_W_RECV  = 4'd1;
-    localparam [3:0] ST_LOAD_W_PULSE = 4'd2;
-    localparam [3:0] ST_LOAD_BIAS    = 4'd3;
-    localparam [3:0] ST_LOAD_IN      = 4'd4;
-    localparam [3:0] ST_COMPUTE      = 4'd5;
-    localparam [3:0] ST_POST_PROC    = 4'd6;
-    localparam [3:0] ST_SEND_OUT     = 4'd7;
-    localparam [3:0] ST_DONE         = 4'd8;
+    localparam [4:0] ST_IDLE         = 5'd0;
+    localparam [4:0] ST_LOAD_W_RECV  = 5'd1;
+    localparam [4:0] ST_LOAD_W_PULSE = 5'd2;
+    localparam [4:0] ST_LOAD_BIAS    = 5'd3;
+    localparam [4:0] ST_LOAD_IN      = 5'd4;
+    localparam [4:0] ST_COMPUTE      = 5'd5;
+    localparam [4:0] ST_POST_PROC    = 5'd6;
+    localparam [4:0] ST_SEND_OUT     = 5'd7;
+    localparam [4:0] ST_DONE         = 5'd8;
     // Phase 2a: im2col mode states
-    localparam [3:0] ST_LOAD_FM      = 4'd9;   // AXIS → scratchpad (feature map)
-    localparam [3:0] ST_LOAD_FM_HI   = 4'd10;  // ghi nửa cao của word vừa nhận
-    localparam [3:0] ST_IM2COL_RUN   = 4'd11;  // im2col đọc FM → ghi A trong scratchpad
-    localparam [3:0] ST_SEND_A_R0    = 4'd12;  // đọc A[2w] từ scratchpad
-    localparam [3:0] ST_SEND_A_R1    = 4'd13;  // đọc A[2w+1], latch A[2w]
-    localparam [3:0] ST_SEND_A_TX    = 4'd14;  // pack 2 phần tử → AXIS master
+    localparam [4:0] ST_LOAD_FM      = 5'd9;
+    localparam [4:0] ST_LOAD_FM_HI   = 5'd10;
+    localparam [4:0] ST_IM2COL_RUN   = 5'd11;
+    localparam [4:0] ST_SEND_A_R0    = 5'd12;
+    localparam [4:0] ST_SEND_A_R1    = 5'd13;
+    localparam [4:0] ST_SEND_A_TX    = 5'd14;
+    // Phase 3a: OS dataflow states (FC)
+    localparam [4:0] ST_OS_LOAD_W    = 5'd15;  // AXIS weight tile → w_os_buf
+    localparam [4:0] ST_OS_LOAD_A    = 5'd16;  // AXIS a-vector → a_os_buf
+    localparam [4:0] ST_OS_FEED      = 5'd17;  // feed os_array (accumulate)
+    localparam [4:0] ST_OS_DRAIN     = 5'd18;  // copy c[n] → psum_buf[0][n]
 
     localparam integer WORDS_PER_ROW = SA_N / 2;   // 4 cho SA_N=8
 
-    reg [3:0] state;
+    reg [4:0] state;
 
     // ── Phase 2a/1b: im2col datapath ──
     // Blocking: load FM 1 lần; lặp nội bộ từng output-row ho (HO_BLK=1 ho/block),
@@ -208,6 +215,20 @@ module control_unit #(
         .po_a_wr_en(ic_a_wr_en), .po_a_wr_addr(ic_a_wr_addr), .po_a_wr_data(ic_a_wr_data)
     );
 
+    // ── Phase 3a: OS dataflow datapath (FC) ──
+    reg  [SA_N*SA_N*DATA_WIDTH-1:0] w_os_buf;   // weight tile [k][n] (1024-bit)
+    reg  [SA_N*DATA_WIDTH-1:0]      a_os_buf;    // a vector (128-bit)
+    reg  [3:0]                      os_row, os_pair;
+    wire [SA_N*ACC_WIDTH-1:0]       os_c;
+    wire                            os_c_valid;
+
+    os_array #(.SA_N(SA_N), .DATA_WIDTH(DATA_WIDTH), .ACC_WIDTH(ACC_WIDTH)) u_os (
+        .pi_clk(pi_clk), .pi_rst_n(pi_rst_n),
+        .pi_valid((state == ST_OS_FEED)), .pi_accumulate(pi_acc_accum),
+        .pi_a(a_os_buf), .pi_w(w_os_buf),
+        .po_c(os_c), .po_valid(os_c_valid)
+    );
+
     // ─────────────────────────────────────────────────────────────
     // Counters
     // ─────────────────────────────────────────────────────────────
@@ -263,7 +284,9 @@ module control_unit #(
     assign po_loading           = (state == ST_LOAD_W_RECV) ||
                                   (state == ST_LOAD_BIAS)   ||
                                   (state == ST_LOAD_IN)     ||
-                                  (state == ST_LOAD_FM);
+                                  (state == ST_LOAD_FM)     ||
+                                  (state == ST_OS_LOAD_W)   ||
+                                  (state == ST_OS_LOAD_A);
     assign po_stream_ready      = po_loading;
     assign po_out_write_req     = (state == ST_SEND_OUT) || (state == ST_SEND_A_TX);
     assign po_num_out_transfers = pi_im2col_mode ? tot_words :
@@ -361,6 +384,11 @@ module control_unit #(
                         state  <= ST_LOAD_FM;
                         fm_idx <= 16'd0;
                         ho_cur <= 8'd0;
+                    end else if (pi_os_mode) begin
+                        // Phase 3a: OS dataflow (FC) — nạp weight tile → w_os_buf.
+                        state   <= ST_OS_LOAD_W;
+                        os_row  <= 4'd0;
+                        os_pair <= 4'd0;
                     end else if (pi_skip_w_load) begin
                         // 1a-ii: giữ weight cũ trong array → bỏ thẳng sang LOAD_BIAS.
                         state     <= ST_LOAD_BIAS;
@@ -433,6 +461,42 @@ module control_unit #(
                         state  <= ST_SEND_A_R0;
                     end
                 end
+            end
+
+            // ─────────── Phase 3a: OS dataflow (FC) ────────────
+            ST_OS_LOAD_W: begin              // 32 word → w_os_buf[k][n]
+                if (pi_stream_valid) begin
+                    w_os_buf[(os_row*SA_N + {os_pair[2:0],1'b0})*DATA_WIDTH +: DATA_WIDTH]
+                        <= pi_stream_data[15:0];
+                    w_os_buf[(os_row*SA_N + {os_pair[2:0],1'b1})*DATA_WIDTH +: DATA_WIDTH]
+                        <= pi_stream_data[31:16];
+                    if (os_pair == WORDS_PER_ROW - 1) begin
+                        os_pair <= 4'd0;
+                        if (os_row == SA_N - 1) begin os_row <= 4'd0; state <= ST_OS_LOAD_A; end
+                        else os_row <= os_row + 4'd1;
+                    end else os_pair <= os_pair + 4'd1;
+                end
+            end
+            ST_OS_LOAD_A: begin              // 4 word → a_os_buf[k]
+                if (pi_stream_valid) begin
+                    a_os_buf[{os_pair[2:0],1'b0}*DATA_WIDTH +: DATA_WIDTH] <= pi_stream_data[15:0];
+                    a_os_buf[{os_pair[2:0],1'b1}*DATA_WIDTH +: DATA_WIDTH] <= pi_stream_data[31:16];
+                    if (os_pair == WORDS_PER_ROW - 1) begin os_pair <= 4'd0; state <= ST_OS_FEED; end
+                    else os_pair <= os_pair + 4'd1;
+                end
+            end
+            ST_OS_FEED: begin                // os_array accumulate 1 K-tile (pi_valid)
+                if (pi_post_skip) state <= ST_DONE;       // K-tile giữa: chỉ cộng dồn
+                else              state <= ST_OS_DRAIN;    // K-tile cuối: → post_proc
+            end
+            ST_OS_DRAIN: begin               // c[n] → psum_buf[slot][0][n]; bias=0 (SW bias)
+                for (ni = 0; ni < SA_N; ni = ni + 1) begin
+                    psum_buf[pi_acc_slot][0][ni[2:0]] <= os_c[ni*ACC_WIDTH +: ACC_WIDTH];
+                    bias_buf[ni[2:0]] <= {DATA_WIDTH{1'b0}};
+                end
+                pp_in_m <= 4'd0; pp_in_n <= 4'd0;
+                pp_out_m <= 4'd0; pp_out_n <= 4'd0; pp_out_cnt <= 10'd0;
+                state <= ST_POST_PROC;
             end
 
             // ─────────── LOAD WEIGHTS - RECEIVE ────────────

@@ -455,6 +455,131 @@ module accelerator_top_tb;
         errs = errs + local_errs;
     endtask
 
+    // ── Phase 3a: OS dataflow — OS(M=1) phải == WS GEMM(M=1) (cùng c[n]=Σ a·w) ──
+    task automatic push_os_tile();      // 32 W word + 4 a word (a = A_mem[0..7])
+        integer r, p;
+        for (r = 0; r < SA_N; r = r + 1)
+            for (p = 0; p < 4; p = p + 1)
+                axis_push({W_mem[r*8 + p*2 + 1], W_mem[r*8 + p*2]});
+        for (p = 0; p < 4; p = p + 1)
+            axis_push({A_mem[p*2 + 1], A_mem[p*2]});
+    endtask
+
+    task automatic run_os_check();
+        integer k, n, i, nw, local_errs;
+        reg [31:0] out_ref [0:7];
+        reg [31:0] cfg;
+
+        // Data M=1,K=8,N=8, bias=0, bypass — giá trị nhỏ
+        for (i = 0; i < 64; i = i + 1) begin A_mem[i] = 16'h0; W_mem[i] = 16'h0; end
+        for (i = 0; i < 8;  i = i + 1) bias_mem[i] = 16'h0;
+        for (k = 0; k < 8; k = k + 1) A_mem[k] = 16'h0080 + k*16'h0004;
+        for (k = 0; k < 8; k = k + 1)
+            for (n = 0; n < 8; n = n + 1)
+                W_mem[k*8 + n] = 16'h0040 + k*16'h0008 + n;
+        nw  = (8 + 1) >> 1;                              // M=1 × ⌈N/2⌉ = 4 word
+        cfg = (1 & 32'hF) | ((8 & 32'hF) << 4) | ((8 & 32'hF) << 8);   // M=1,K=8,N=8,bypass
+
+        // ── Reference: WS GEMM (M=1) ──
+        reset_dut();
+        @(negedge clk); capture_enable = 1'b0; capture_reset = 1'b1;
+        @(posedge clk); @(negedge clk); capture_reset = 1'b0; capture_enable = 1'b1;
+        axi_lite_write(5'h00, cfg | (32'h1 << 14));     // START
+        push_tile(1, 8);
+        wait_done("os.ref(WS)");
+        @(posedge clk); capture_enable = 1'b0;
+        for (i = 0; i < nw; i = i + 1) out_ref[i] = capture_buf[i];
+
+        // ── OS mode (M=1) — 1 K-tile: acc_accum=0, post_skip=0 ──
+        reset_dut();
+        @(negedge clk); capture_enable = 1'b0; capture_reset = 1'b1;
+        @(posedge clk); @(negedge clk); capture_reset = 1'b0; capture_enable = 1'b1;
+        axi_lite_write(5'h00, cfg | (32'h1 << 14) | (32'h1 << 22));   // START | OS_MODE
+        push_os_tile();
+        wait_done("os.run");
+        @(posedge clk); capture_enable = 1'b0;
+
+        // ── So sánh OS == WS ──
+        local_errs = 0;
+        if (capture_count !== nw) begin
+            $display("[FAIL] os: captured %0d words, expected %0d", capture_count, nw);
+            local_errs = local_errs + 1;
+        end
+        for (i = 0; i < nw; i = i + 1)
+            if (out_ref[i] !== capture_buf[i]) begin
+                $display("[FAIL] os word %0d: WS=0x%h OS=0x%h", i, out_ref[i], capture_buf[i]);
+                local_errs = local_errs + 1;
+            end
+        if (local_errs == 0)
+            $display("[ OK ] OS-mode(M=1) == WS GEMM(M=1), util 64/64 PE (%0d words)", nw);
+        errs = errs + local_errs;
+    endtask
+
+    // OS multi-K-tile (FC K>8): OS 2 K-tile == WS 2 K-tile (K-accum). Exercise
+    // FEED→DONE (K-tile giữa) + FEED→DRAIN (K-tile cuối).
+    task automatic run_os_ktile_check();
+        integer k, n, t, i, nw, local_errs;
+        reg [15:0] Wf [0:127];   // W[16][8]
+        reg [15:0] Af [0:15];    // a[16]
+        reg [31:0] out_ref [0:7];
+        reg [31:0] cfg;
+
+        for (i = 0; i < 8; i = i + 1) bias_mem[i] = 16'h0;
+        for (k = 0; k < 16; k = k + 1) Af[k] = 16'h0040 + k*16'h0002;
+        for (k = 0; k < 16; k = k + 1)
+            for (n = 0; n < 8; n = n + 1)
+                Wf[k*8 + n] = 16'h0020 + k*16'h0004 + n;
+        nw  = (8 + 1) >> 1;        // M=1 × ⌈N/2⌉ = 4 word
+        cfg = (1 & 32'hF) | ((8 & 32'hF) << 4) | ((8 & 32'hF) << 8);
+
+        // ── Reference: WS K-accum (2 tile) ──
+        reset_dut();
+        @(negedge clk); capture_enable = 1'b0; capture_reset = 1'b1;
+        @(posedge clk); @(negedge clk); capture_reset = 1'b0; capture_enable = 1'b1;
+        for (t = 0; t < 2; t = t + 1) begin
+            for (k = 0; k < 8; k = k + 1) begin
+                A_mem[k] = Af[t*8 + k];
+                for (n = 0; n < 8; n = n + 1) W_mem[k*8 + n] = Wf[(t*8 + k)*8 + n];
+            end
+            // t0: post_skip + overwrite; t1: acc_accum + output
+            axi_lite_write(5'h00, cfg | (32'h1<<14) | (t==0 ? (32'h1<<16) : (32'h1<<15)));
+            push_tile(1, 8);
+            wait_done("os_k.ws");
+        end
+        @(posedge clk); capture_enable = 1'b0;
+        for (i = 0; i < nw; i = i + 1) out_ref[i] = capture_buf[i];
+
+        // ── OS 2 K-tile ──
+        reset_dut();
+        @(negedge clk); capture_enable = 1'b0; capture_reset = 1'b1;
+        @(posedge clk); @(negedge clk); capture_reset = 1'b0; capture_enable = 1'b1;
+        for (t = 0; t < 2; t = t + 1) begin
+            for (k = 0; k < 8; k = k + 1) begin
+                A_mem[k] = Af[t*8 + k];
+                for (n = 0; n < 8; n = n + 1) W_mem[k*8 + n] = Wf[(t*8 + k)*8 + n];
+            end
+            axi_lite_write(5'h00, cfg | (32'h1<<14) | (32'h1<<22)
+                                | (t==0 ? (32'h1<<16) : (32'h1<<15)));  // OS|skip/accum
+            push_os_tile();
+            wait_done("os_k.os");
+        end
+        @(posedge clk); capture_enable = 1'b0;
+
+        local_errs = 0;
+        if (capture_count !== nw) begin
+            $display("[FAIL] os_ktile: captured %0d != %0d", capture_count, nw);
+            local_errs = local_errs + 1;
+        end
+        for (i = 0; i < nw; i = i + 1)
+            if (out_ref[i] !== capture_buf[i]) begin
+                $display("[FAIL] os_ktile word %0d: WS=0x%h OS=0x%h", i, out_ref[i], capture_buf[i]);
+                local_errs = local_errs + 1;
+            end
+        if (local_errs == 0)
+            $display("[ OK ] OS 2-K-tile (K=16) == WS K-accum (%0d words)", nw);
+        errs = errs + local_errs;
+    endtask
+
     task automatic push_bias_input(input integer M, input integer K);
         integer p, m, Kp;
         reg [15:0] lo, hi;
@@ -969,6 +1094,12 @@ module accelerator_top_tb;
         run_im2col_check(4, 4, 1, 2, 2, 1, 0);    // 3 block
         reset_dut();
         run_im2col_check(8, 8, 2, 3, 3, 1, 0);    // 6 block, multi-channel
+
+        // Phase 3a: OS dataflow (FC) — OS(M=1) == WS(M=1)
+        reset_dut();
+        run_os_check();
+        reset_dut();
+        run_os_ktile_check();
 
         // ─────────── Summary ───────────
         $display("");

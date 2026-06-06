@@ -43,6 +43,7 @@ module accelerator_slave_lite_v2_0_S00_AXI #(
     output wire         po_im2col_mode, // slv_reg0[21] 1=chế độ im2col (thay GEMM)
     output wire [31:0]  po_im2col_cfg0, // 0x14: {H[7:0],W[7:0],C[7:0],KH[3:0],KW[3:0]}
     output wire [31:0]  po_im2col_cfg1, // 0x18: {Hout[7:0],Wout[7:0],stride[3:0],pad[3:0]}
+    output wire         po_os_mode,     // slv_reg0[22] 1=Output-Stationary (FC)
     // ── User-side inputs (từ control_unit/data_path) ──
     input  wire         pi_busy,
     input  wire         pi_done,
@@ -305,6 +306,7 @@ module accelerator_slave_lite_v2_0_S00_AXI #(
     assign po_im2col_mode = slv_reg0[21];
     assign po_im2col_cfg0 = slv_reg5;
     assign po_im2col_cfg1 = slv_reg6;
+    assign po_os_mode     = slv_reg0[22];
     assign po_cnt_clear   = slv_reg1[0];
     assign po_cnt_sel     = slv_reg2[3:0];
 
