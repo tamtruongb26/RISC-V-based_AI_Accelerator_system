@@ -33,13 +33,36 @@ module pe #(
     reg                         valid_reg;   // valid register
     reg signed [ACC_WIDTH-1:0]  psum_reg;    // accumulate register
 
+    // ----- Phase 4: sparsity operand isolation -----
+    // Khi a hoặc w = 0 → product = 0. Thay vì feed multiplier giá trị mới (tốn
+    // dynamic power do toggle), GIỮ operand cũ → multiplier không switch. Output
+    // bị bỏ (psum += 0). Functional KHÔNG đổi (0×w = 0). ReLU → 40-60% activation
+    // = 0 ở middle layer → tiết kiệm đáng kể (đo bằng SAIF + power report).
+    reg signed [DATA_WIDTH-1:0] a_iso, w_iso;
+    wire is_zero = (pi_a_in == {DATA_WIDTH{1'b0}}) || (w_reg == {DATA_WIDTH{1'b0}});
+
+    // Operand vào multiplier: thực khi !is_zero, giữ cũ khi is_zero (no toggle).
+    wire signed [DATA_WIDTH-1:0] mult_a = is_zero ? a_iso : pi_a_in;
+    wire signed [DATA_WIDTH-1:0] mult_w = is_zero ? w_iso : w_reg;
+
     // ----- Combinational multiply (sign-extend Q2.8.22 → 40-bit) -----
     wire signed [2*DATA_WIDTH-1:0] mult_raw;
     wire signed [ACC_WIDTH-1:0]    mult_ext;
 
-    assign mult_raw = $signed(pi_a_in) * $signed(w_reg);
+    assign mult_raw = $signed(mult_a) * $signed(mult_w);
     assign mult_ext = {{(ACC_WIDTH - 2*DATA_WIDTH){mult_raw[2*DATA_WIDTH-1]}},
                        mult_raw};
+
+    // Latch operand "thực" gần nhất để giữ cho multiplier khi is_zero.
+    always @(posedge pi_clk or negedge pi_rst_n) begin
+        if (!pi_rst_n) begin
+            a_iso <= {DATA_WIDTH{1'b0}};
+            w_iso <= {DATA_WIDTH{1'b0}};
+        end else if (!is_zero) begin
+            a_iso <= pi_a_in;
+            w_iso <= w_reg;
+        end
+    end
 
     // ----- Sequential -----
     always @(posedge pi_clk or negedge pi_rst_n) begin
@@ -58,7 +81,8 @@ module pe #(
             // Compute mode: cả 3 pipeline reg đều luôn advance.
             a_reg     <= pi_a_in;
             valid_reg <= pi_valid_in;
-            if (pi_valid_in)
+            // Sparsity: cộng mult chỉ khi valid VÀ !is_zero (is_zero → +0, bỏ qua).
+            if (pi_valid_in && !is_zero)
                 psum_reg <= pi_psum_in + mult_ext;     // accumulate
             else
                 psum_reg <= pi_psum_in;                // pass through (KHÔNG clear)
