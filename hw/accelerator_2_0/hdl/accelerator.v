@@ -77,6 +77,7 @@ module accelerator #(
     wire [31:0] im2col_cfg0;
     wire [31:0] im2col_cfg1;
     wire       os_mode;          // Phase 3a: OS dataflow (FC)
+    wire       pool_mode;        // Phase 2b: HW maxpool
     // ── Phase 1a-ii: data reuse control ──
     wire       skip_w_load;
     wire [1:0] acc_slot;
@@ -158,6 +159,7 @@ module accelerator #(
         .po_im2col_cfg0  (im2col_cfg0),
         .po_im2col_cfg1  (im2col_cfg1),
         .po_os_mode      (os_mode),
+        .po_pool_mode    (pool_mode),
         .po_cnt_clear    (cnt_clear),
         .po_cnt_sel      (cnt_sel),
         .pi_busy         (busy),
@@ -248,6 +250,7 @@ module accelerator #(
         .pi_im2col_cfg0       (im2col_cfg0),
         .pi_im2col_cfg1       (im2col_cfg1),
         .pi_os_mode           (os_mode),
+        .pi_pool_mode         (pool_mode),
         .po_busy              (busy),
         .po_done              (done),
         .pi_stream_data       (stream_data),

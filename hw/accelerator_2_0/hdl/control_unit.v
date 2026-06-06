@@ -40,6 +40,8 @@ module control_unit #(
     input  wire [31:0]                   pi_im2col_cfg1,
     // ── Phase 3a: OS dataflow (FC) ──
     input  wire                          pi_os_mode,
+    // ── Phase 2b: HW maxpool ──
+    input  wire                          pi_pool_mode,
     output reg                           po_busy,
     output reg                           po_done,
 
@@ -117,6 +119,8 @@ module control_unit #(
     localparam [4:0] ST_OS_LOAD_A    = 5'd16;  // AXIS a-vector → a_os_buf
     localparam [4:0] ST_OS_FEED      = 5'd17;  // feed os_array (accumulate)
     localparam [4:0] ST_OS_DRAIN     = 5'd18;  // copy c[n] → psum_buf[0][n]
+    // Phase 2b: HW maxpool state
+    localparam [4:0] ST_POOL_RUN     = 5'd19;  // maxpool đọc FM → ghi pooled u_sp_a
 
     localparam integer WORDS_PER_ROW = SA_N / 2;   // 4 cho SA_N=8
 
@@ -160,8 +164,13 @@ module control_unit #(
     wire        ic_fm_rd_en;  wire [15:0] ic_fm_rd_addr;
     wire        ic_a_wr_en;   wire [15:0] ic_a_wr_addr;  wire [15:0] ic_a_wr_data;
     wire        ic_busy, ic_done;
-    wire [15:0] sp_fm_rd_data;   // u_sp_fm read → im2col
+    wire [15:0] sp_fm_rd_data;   // u_sp_fm read → im2col/maxpool
     wire [15:0] sp_a_rd_data;    // u_sp_a read  → SEND
+
+    // maxpool ↔ scratchpad wires (Phase 2b)
+    wire        mp_fm_rd_en;   wire [15:0] mp_fm_rd_addr;
+    wire        mp_out_wr_en;  wire [15:0] mp_out_wr_addr;  wire signed [15:0] mp_out_wr_data;
+    wire        mp_busy, mp_done;
 
     // ── u_sp_fm (feature map) ──
     // write: FM load (LOAD_FM/_HI). read: im2col fm_rd.
@@ -175,13 +184,19 @@ module control_unit #(
             fm_wr_en = 1'b0;           fm_wr_addr = 11'd0;        fm_wr_data = 16'd0;
         end
     end
-    wire        fm_rd_en   = (state == ST_IM2COL_RUN) && ic_fm_rd_en;
-    wire [10:0] fm_rd_addr = ic_fm_rd_addr[10:0];
+    // read: im2col fm_rd (IM2COL_RUN) hoặc maxpool fm_rd (POOL_RUN).
+    wire        fm_rd_en   = ((state == ST_IM2COL_RUN) && ic_fm_rd_en) ||
+                             ((state == ST_POOL_RUN)   && mp_fm_rd_en);
+    wire [10:0] fm_rd_addr = (state == ST_POOL_RUN) ? mp_fm_rd_addr[10:0]
+                                                    : ic_fm_rd_addr[10:0];
 
-    // ── u_sp_a (im2col output A) ──
-    // write: im2col a_wr. read: SEND R0/R1.
-    wire        a_wr_en   = (state == ST_IM2COL_RUN) && ic_a_wr_en;
-    wire [10:0] a_wr_addr = ic_a_wr_addr[10:0];
+    // ── u_sp_a (output: im2col A hoặc pooled) ──
+    // write: im2col a_wr (IM2COL_RUN) hoặc maxpool out_wr (POOL_RUN). read: SEND.
+    wire        a_wr_en   = ((state == ST_IM2COL_RUN) && ic_a_wr_en) ||
+                            ((state == ST_POOL_RUN)   && mp_out_wr_en);
+    wire [10:0] a_wr_addr = (state == ST_POOL_RUN) ? mp_out_wr_addr[10:0]
+                                                   : ic_a_wr_addr[10:0];
+    wire [15:0] a_wr_data = (state == ST_POOL_RUN) ? mp_out_wr_data : ic_a_wr_data;
     reg         a_rd_en;  reg [10:0] a_rd_addr;
     always @(*) begin
         if (state == ST_SEND_A_R0) begin
@@ -201,7 +216,7 @@ module control_unit #(
 
     scratchpad #(.DATA_WIDTH(16), .DEPTH(SP_A_DEPTH)) u_sp_a (
         .pi_clk(pi_clk),
-        .pi_wr_en(a_wr_en), .pi_wr_bank(1'b0), .pi_wr_addr(a_wr_addr), .pi_wr_data(ic_a_wr_data),
+        .pi_wr_en(a_wr_en), .pi_wr_bank(1'b0), .pi_wr_addr(a_wr_addr), .pi_wr_data(a_wr_data),
         .pi_rd_en(a_rd_en), .pi_rd_bank(1'b0), .pi_rd_addr(a_rd_addr), .po_rd_data(sp_a_rd_data)
     );
 
@@ -214,6 +229,20 @@ module control_unit #(
         .po_fm_rd_en(ic_fm_rd_en), .po_fm_rd_addr(ic_fm_rd_addr), .pi_fm_rd_data(sp_fm_rd_data),
         .po_a_wr_en(ic_a_wr_en), .po_a_wr_addr(ic_a_wr_addr), .po_a_wr_data(ic_a_wr_data)
     );
+
+    // ── Phase 2b: HW maxpool — đọc FM (u_sp_fm) → ghi pooled (u_sp_a) ──
+    reg mp_start;
+    maxpool2x2 #(.DATA_WIDTH(16), .ADDR_WIDTH(16), .DIM_WIDTH(8)) u_maxpool (
+        .pi_clk(pi_clk), .pi_rst_n(pi_rst_n), .pi_start(mp_start),
+        .po_busy(mp_busy), .po_done(mp_done),
+        .pi_H(ic_H), .pi_W(ic_W), .pi_C(ic_C),
+        .po_fm_rd_en(mp_fm_rd_en), .po_fm_rd_addr(mp_fm_rd_addr), .pi_fm_rd_data($signed(sp_fm_rd_data)),
+        .po_out_wr_en(mp_out_wr_en), .po_out_wr_addr(mp_out_wr_addr), .po_out_wr_data(mp_out_wr_data)
+    );
+
+    // pooled output: C*(H/2)*(W/2) phần tử → word
+    wire [15:0] pool_total  = ic_C * (ic_H >> 1) * (ic_W >> 1);
+    wire [15:0] pool_nwords = (pool_total + 16'd1) >> 1;
 
     // ── Phase 3a: OS dataflow datapath (FC) ──
     reg  [SA_N*SA_N*DATA_WIDTH-1:0] w_os_buf;   // weight tile [k][n] (1024-bit)
@@ -290,6 +319,7 @@ module control_unit #(
     assign po_stream_ready      = po_loading;
     assign po_out_write_req     = (state == ST_SEND_OUT) || (state == ST_SEND_A_TX);
     assign po_num_out_transfers = pi_im2col_mode ? tot_words :
+                                  pi_pool_mode   ? pool_nwords :
                                   {6'd0, (pi_tile_m_size * ((pi_tile_n_size + 10'd1) >> 1))};
     assign po_out_data          = (state == ST_SEND_A_TX) ?
                                   {sp_a_rd_data, send_lo} :
@@ -362,6 +392,7 @@ module control_unit #(
             fm_idx                <= 16'd0;
             fm_hi                 <= 16'd0;
             ic_start              <= 1'b0;
+            mp_start              <= 1'b0;
             a_word                <= 12'd0;
             send_lo               <= 16'd0;
             ho_cur                <= 8'd0;
@@ -371,6 +402,7 @@ module control_unit #(
             po_done           <= 1'b0;
             po_pp_valid_in    <= 1'b0;
             ic_start          <= 1'b0;
+            mp_start          <= 1'b0;
 
             case (state)
 
@@ -379,8 +411,8 @@ module control_unit #(
                 po_busy <= 1'b0;
                 if (pi_start) begin
                     po_busy <= 1'b1;
-                    if (pi_im2col_mode) begin
-                        // Phase 2a: chế độ im2col — nạp feature map → scratchpad.
+                    if (pi_im2col_mode || pi_pool_mode) begin
+                        // Phase 2a/2b: im2col hoặc maxpool — nạp feature map → scratchpad.
                         state  <= ST_LOAD_FM;
                         fm_idx <= 16'd0;
                         ho_cur <= 8'd0;
@@ -409,8 +441,8 @@ module control_unit #(
                     fm_hi  <= pi_stream_data[31:16];
                     fm_idx <= fm_idx + 16'd1;
                     if (fm_idx + 16'd1 >= fm_total) begin
-                        ic_start <= 1'b1;
-                        state    <= ST_IM2COL_RUN;
+                        if (pi_pool_mode) begin mp_start <= 1'b1; state <= ST_POOL_RUN; end
+                        else              begin ic_start <= 1'b1; state <= ST_IM2COL_RUN; end
                     end else begin
                         state <= ST_LOAD_FM_HI;
                     end
@@ -421,10 +453,18 @@ module control_unit #(
                 // hi ghi qua sp_wr mux ở cycle này (addr=fm_idx)
                 fm_idx <= fm_idx + 16'd1;
                 if (fm_idx + 16'd1 >= fm_total) begin
-                    ic_start <= 1'b1;
-                    state    <= ST_IM2COL_RUN;
+                    if (pi_pool_mode) begin mp_start <= 1'b1; state <= ST_POOL_RUN; end
+                    else              begin ic_start <= 1'b1; state <= ST_IM2COL_RUN; end
                 end else begin
                     state <= ST_LOAD_FM;
+                end
+            end
+
+            // ─────────── Phase 2b: maxpool chạy (FM→pooled trong scratchpad) ─────
+            ST_POOL_RUN: begin
+                if (mp_done) begin
+                    a_word <= 12'd0;
+                    state  <= ST_SEND_A_R0;     // tái dùng SEND đọc u_sp_a
                 end
             end
 
@@ -444,10 +484,14 @@ module control_unit #(
                 send_lo <= sp_a_rd_data;
                 state   <= ST_SEND_A_TX;
             end
-            ST_SEND_A_TX: begin           // po_out_data={sp_rd_data(=A[2w+1]),send_lo}
+            ST_SEND_A_TX: begin           // po_out_data={sp_a_rd_data(=A[2w+1]),send_lo}
                 if (pi_out_write_done) begin
-                    if (a_word + 12'd1 >= a_nwords[11:0]) begin
-                        // hết word của block này → sang block ho kế hoặc xong
+                    if (pi_pool_mode) begin
+                        // POOL: gửi tuyến tính pool_nwords word → xong (không loop block)
+                        if (a_word + 12'd1 >= pool_nwords[11:0]) state <= ST_DONE;
+                        else begin a_word <= a_word + 12'd1; state <= ST_SEND_A_R0; end
+                    end else if (a_word + 12'd1 >= a_nwords[11:0]) begin
+                        // im2col: hết word của block này → sang block ho kế hoặc xong
                         if (ho_cur + 8'd1 >= ic_Hout) begin
                             state <= ST_DONE;
                         end else begin

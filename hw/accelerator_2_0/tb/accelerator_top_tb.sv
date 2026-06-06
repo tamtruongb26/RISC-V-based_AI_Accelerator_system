@@ -1009,6 +1009,59 @@ module accelerator_top_tb;
     endtask
 
     // ─────────────────────────────────────────────────────────────
+    // Case: HW maxpool mode (Phase 2b integration)
+    //   POOL_MODE: stream FM [C×H×W] → maxpool 2×2 → output C×(H/2)×(W/2).
+    // ─────────────────────────────────────────────────────────────
+    task automatic run_pool_check(input integer Hh, Ww, Cc);
+        integer hout, wout, c, ho, wo, i, oi, nwords, local_errs;
+        reg [15:0] fm   [0:511];
+        reg signed [15:0] gold [0:511];
+        reg signed [15:0] e0,e1,e2,e3, got, exp;
+        reg [31:0] cfg0;
+
+        hout = Hh/2; wout = Ww/2;
+        for (i=0;i<Cc*Hh*Ww;i=i+1) fm[i] = 16'h0040 + ((i*37) % 211);   // scrambled
+
+        oi = 0;                              // golden 2×2 signed max
+        for (c=0;c<Cc;c=c+1)
+        for (ho=0;ho<hout;ho=ho+1)
+        for (wo=0;wo<wout;wo=wo+1) begin
+            e0 = fm[c*Hh*Ww + (2*ho)*Ww   + 2*wo];
+            e1 = fm[c*Hh*Ww + (2*ho)*Ww   + 2*wo+1];
+            e2 = fm[c*Hh*Ww + (2*ho+1)*Ww + 2*wo];
+            e3 = fm[c*Hh*Ww + (2*ho+1)*Ww + 2*wo+1];
+            gold[oi] = (e0>e1?e0:e1) > (e2>e3?e2:e3) ? (e0>e1?e0:e1) : (e2>e3?e2:e3);
+            oi = oi + 1;
+        end
+
+        cfg0 = (Cc<<16)|(Ww<<8)|Hh;          // pool chỉ cần H/W/C
+        @(negedge clk); capture_enable=1'b0; capture_reset=1'b1;
+        @(posedge clk); @(negedge clk); capture_reset=1'b0; capture_enable=1'b1;
+        axi_lite_write(5'h14, cfg0);
+        axi_lite_write(5'h00, (32'h1<<23) | (32'h1<<14));   // POOL_MODE | START
+
+        nwords = (Cc*Hh*Ww + 1) >> 1;
+        for (i=0;i<nwords;i=i+1) axis_push({fm[2*i+1], fm[2*i]});
+
+        wait_done("pool");
+        @(posedge clk); capture_enable=1'b0;
+
+        local_errs = 0;
+        for (i=0;i<oi;i=i+1) begin
+            got = (i[0]) ? capture_buf[i>>1][31:16] : capture_buf[i>>1][15:0];
+            exp = gold[i];
+            if (got !== exp) begin
+                if (local_errs<6) $display("[FAIL] pool out[%0d]: got=0x%h exp=0x%h", i, got, exp);
+                local_errs = local_errs + 1;
+            end
+        end
+        if (local_errs==0)
+            $display("[ OK ] pool-mode: %0dx%0dx%0d → %0dx%0dx%0d khớp golden (%0d word)",
+                     Hh, Ww, Cc, hout, wout, Cc, capture_count);
+        errs = errs + local_errs;
+    endtask
+
+    // ─────────────────────────────────────────────────────────────
     // Main stimulus
     // ─────────────────────────────────────────────────────────────
     initial begin
@@ -1100,6 +1153,12 @@ module accelerator_top_tb;
         run_os_check();
         reset_dut();
         run_os_ktile_check();
+
+        // Phase 2b: HW maxpool integration
+        reset_dut();
+        run_pool_check(4, 4, 1);
+        reset_dut();
+        run_pool_check(8, 8, 2);
 
         // ─────────── Summary ───────────
         $display("");
