@@ -115,11 +115,14 @@ module control_unit #(
 
     reg [3:0] state;
 
-    // ── Phase 2a: im2col datapath (scratchpad 16-bit + im2col engine) ──
+    // ── Phase 2a/1b: im2col datapath ──
     // Blocking: load FM 1 lần; lặp nội bộ từng output-row ho (HO_BLK=1 ho/block),
-    // mỗi block im2col sinh Wout hàng A → SEND ra. A region tái dùng mỗi block.
-    localparam integer SP_DEPTH  = 4096;           // addr 12-bit
-    localparam [11:0]  SP_A_BASE = 12'd1024;       // FM ở 0..1023, A ở 1024..
+    // mỗi block im2col sinh Wout hàng A → SEND ra.
+    // 1b-a: TÁCH 2 scratchpad — u_sp_fm (FM, im2col đọc) + u_sp_a (A, im2col ghi /
+    // SEND đọc). Port riêng → im2col-đọc-FM và SEND-đọc-A chạy đồng thời được
+    // (nền cho double-buffer 1b-b). A-scratchpad 2 bank cho ping-pong sau.
+    localparam integer SP_FM_DEPTH = 1024;         // FM tối đa (Conv2 864)
+    localparam integer SP_A_DEPTH  = 2048;         // 1 block A (Conv2 Wout*K=1200)
 
     // Unpack config
     wire [7:0] ic_H    = pi_im2col_cfg0[7:0];
@@ -150,52 +153,49 @@ module control_unit #(
     wire        ic_fm_rd_en;  wire [15:0] ic_fm_rd_addr;
     wire        ic_a_wr_en;   wire [15:0] ic_a_wr_addr;  wire [15:0] ic_a_wr_data;
     wire        ic_busy, ic_done;
-    wire [15:0] sp_rd_data;
+    wire [15:0] sp_fm_rd_data;   // u_sp_fm read → im2col
+    wire [15:0] sp_a_rd_data;    // u_sp_a read  → SEND
 
-    // scratchpad write mux: IM2COL_RUN → im2col A; LOAD_FM(_HI) → FM load
-    reg         sp_wr_en;  reg [11:0] sp_wr_addr;  reg [15:0] sp_wr_data;
+    // ── u_sp_fm (feature map) ──
+    // write: FM load (LOAD_FM/_HI). read: im2col fm_rd.
+    reg         fm_wr_en;  reg [10:0] fm_wr_addr;  reg [15:0] fm_wr_data;
     always @(*) begin
-        if (state == ST_IM2COL_RUN) begin
-            sp_wr_en   = ic_a_wr_en;
-            sp_wr_addr = SP_A_BASE + ic_a_wr_addr[11:0];
-            sp_wr_data = ic_a_wr_data;
-        end else if (state == ST_LOAD_FM) begin
-            sp_wr_en   = pi_stream_valid;
-            sp_wr_addr = fm_idx[11:0];
-            sp_wr_data = pi_stream_data[15:0];
+        if (state == ST_LOAD_FM) begin
+            fm_wr_en = pi_stream_valid; fm_wr_addr = fm_idx[10:0]; fm_wr_data = pi_stream_data[15:0];
         end else if (state == ST_LOAD_FM_HI) begin
-            sp_wr_en   = 1'b1;
-            sp_wr_addr = fm_idx[11:0];
-            sp_wr_data = fm_hi;
+            fm_wr_en = 1'b1;            fm_wr_addr = fm_idx[10:0]; fm_wr_data = fm_hi;
         end else begin
-            sp_wr_en   = 1'b0;
-            sp_wr_addr = 12'd0;
-            sp_wr_data = 16'd0;
+            fm_wr_en = 1'b0;           fm_wr_addr = 11'd0;        fm_wr_data = 16'd0;
         end
     end
-    reg         sp_rd_en;  reg [11:0] sp_rd_addr;
+    wire        fm_rd_en   = (state == ST_IM2COL_RUN) && ic_fm_rd_en;
+    wire [10:0] fm_rd_addr = ic_fm_rd_addr[10:0];
+
+    // ── u_sp_a (im2col output A) ──
+    // write: im2col a_wr. read: SEND R0/R1.
+    wire        a_wr_en   = (state == ST_IM2COL_RUN) && ic_a_wr_en;
+    wire [10:0] a_wr_addr = ic_a_wr_addr[10:0];
+    reg         a_rd_en;  reg [10:0] a_rd_addr;
     always @(*) begin
-        if (state == ST_IM2COL_RUN) begin
-            sp_rd_en   = ic_fm_rd_en;
-            sp_rd_addr = ic_fm_rd_addr[11:0];
-        end else if (state == ST_SEND_A_R0) begin
-            sp_rd_en   = 1'b1;
-            sp_rd_addr = SP_A_BASE + {a_word, 1'b0};          // 2w
+        if (state == ST_SEND_A_R0) begin
+            a_rd_en = 1'b1; a_rd_addr = {a_word[9:0], 1'b0};         // 2w
         end else if (state == ST_SEND_A_R1) begin
-            sp_rd_en   = 1'b1;
-            sp_rd_addr = SP_A_BASE + {a_word, 1'b0} + 12'd1;  // 2w+1
+            a_rd_en = 1'b1; a_rd_addr = {a_word[9:0], 1'b0} + 11'd1; // 2w+1
         end else begin
-            sp_rd_en   = 1'b0;
-            sp_rd_addr = 12'd0;
+            a_rd_en = 1'b0; a_rd_addr = 11'd0;
         end
     end
 
-    scratchpad #(.DATA_WIDTH(16), .DEPTH(SP_DEPTH)) u_sp (
-        .pi_clk     (pi_clk),
-        .pi_wr_en   (sp_wr_en),  .pi_wr_bank(1'b0),
-        .pi_wr_addr (sp_wr_addr), .pi_wr_data(sp_wr_data),
-        .pi_rd_en   (sp_rd_en),  .pi_rd_bank(1'b0),
-        .pi_rd_addr (sp_rd_addr), .po_rd_data(sp_rd_data)
+    scratchpad #(.DATA_WIDTH(16), .DEPTH(SP_FM_DEPTH)) u_sp_fm (
+        .pi_clk(pi_clk),
+        .pi_wr_en(fm_wr_en), .pi_wr_bank(1'b0), .pi_wr_addr(fm_wr_addr), .pi_wr_data(fm_wr_data),
+        .pi_rd_en(fm_rd_en), .pi_rd_bank(1'b0), .pi_rd_addr(fm_rd_addr), .po_rd_data(sp_fm_rd_data)
+    );
+
+    scratchpad #(.DATA_WIDTH(16), .DEPTH(SP_A_DEPTH)) u_sp_a (
+        .pi_clk(pi_clk),
+        .pi_wr_en(a_wr_en), .pi_wr_bank(1'b0), .pi_wr_addr(a_wr_addr), .pi_wr_data(ic_a_wr_data),
+        .pi_rd_en(a_rd_en), .pi_rd_bank(1'b0), .pi_rd_addr(a_rd_addr), .po_rd_data(sp_a_rd_data)
     );
 
     im2col #(.DATA_WIDTH(16), .ADDR_WIDTH(16), .DIM_WIDTH(8)) u_im2col (
@@ -204,7 +204,7 @@ module control_unit #(
         .pi_H(ic_H), .pi_W(ic_W), .pi_C(ic_C), .pi_KH(ic_KH), .pi_KW(ic_KW),
         .pi_stride(ic_str), .pi_pad(ic_pad),
         .pi_ho_start(ho_cur), .pi_ho_count(8'd1), .pi_W_out(ic_Wout),
-        .po_fm_rd_en(ic_fm_rd_en), .po_fm_rd_addr(ic_fm_rd_addr), .pi_fm_rd_data(sp_rd_data),
+        .po_fm_rd_en(ic_fm_rd_en), .po_fm_rd_addr(ic_fm_rd_addr), .pi_fm_rd_data(sp_fm_rd_data),
         .po_a_wr_en(ic_a_wr_en), .po_a_wr_addr(ic_a_wr_addr), .po_a_wr_data(ic_a_wr_data)
     );
 
@@ -269,7 +269,7 @@ module control_unit #(
     assign po_num_out_transfers = pi_im2col_mode ? tot_words :
                                   {6'd0, (pi_tile_m_size * ((pi_tile_n_size + 10'd1) >> 1))};
     assign po_out_data          = (state == ST_SEND_A_TX) ?
-                                  {sp_rd_data, send_lo} :
+                                  {sp_a_rd_data, send_lo} :
                                   {out_buf[send_row[2:0]][{send_pair[2:0], 1'b1}],
                                    out_buf[send_row[2:0]][{send_pair[2:0], 1'b0}]};
 
@@ -412,8 +412,8 @@ module control_unit #(
             ST_SEND_A_R0: begin           // issue read A[2w] (qua sp_rd mux)
                 state <= ST_SEND_A_R1;
             end
-            ST_SEND_A_R1: begin           // sp_rd_data = A[2w]; issue read A[2w+1]
-                send_lo <= sp_rd_data;
+            ST_SEND_A_R1: begin           // sp_a_rd_data = A[2w]; issue read A[2w+1]
+                send_lo <= sp_a_rd_data;
                 state   <= ST_SEND_A_TX;
             end
             ST_SEND_A_TX: begin           // po_out_data={sp_rd_data(=A[2w+1]),send_lo}
