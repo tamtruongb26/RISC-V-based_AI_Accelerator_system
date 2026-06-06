@@ -117,7 +117,7 @@ module accelerator #(
     wire [31:0] out_data;
     wire        out_write_req;
     wire        out_write_done;
-    wire [9:0]  num_out_transfers;
+    wire [15:0] num_out_transfers;
 
     // ── control_unit ↔ data_path ──
     wire                          dp_weight_load;

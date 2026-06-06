@@ -42,7 +42,7 @@ module im2col_tb;
         .po_busy(busy), .po_done(done),
         .pi_H(H), .pi_W(W), .pi_C(C),
         .pi_KH(KH), .pi_KW(KW), .pi_stride(STR), .pi_pad(PAD),
-        .pi_H_out(Hout), .pi_W_out(Wout),
+        .pi_ho_start(8'd0), .pi_ho_count(Hout), .pi_W_out(Wout),
         .po_fm_rd_en(fm_rd_en), .po_fm_rd_addr(fm_rd_addr), .pi_fm_rd_data(fm_rd_data),
         .po_a_wr_en(a_wr_en), .po_a_wr_addr(a_wr_addr), .po_a_wr_data(a_wr_data)
     );

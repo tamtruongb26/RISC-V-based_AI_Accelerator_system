@@ -35,7 +35,10 @@ module im2col #(
     input  wire [3:0]              pi_KW,
     input  wire [3:0]              pi_stride,
     input  wire [3:0]              pi_pad,
-    input  wire [DIM_WIDTH-1:0]    pi_H_out,
+    // Blocking: chỉ sinh các output-row ho trong [ho_start, ho_start+ho_count).
+    // im2col đầy đủ = ho_start 0, ho_count Hout. A write addr linear từ 0 mỗi lần.
+    input  wire [DIM_WIDTH-1:0]    pi_ho_start,
+    input  wire [DIM_WIDTH-1:0]    pi_ho_count,
     input  wire [DIM_WIDTH-1:0]    pi_W_out,
 
     // ── FM read port (CHW): addr = c*H*W + h*W + w, data 1-cycle sau ──
@@ -56,7 +59,8 @@ module im2col #(
     reg [1:0] state;
 
     // ── Config đã latch ──
-    reg [DIM_WIDTH-1:0]  H, W, C, Hout, Wout;
+    reg [DIM_WIDTH-1:0]  H, W, C, Wout;
+    reg [DIM_WIDTH-1:0]  ho_last;     // = ho_start + ho_count - 1
     reg [3:0]            KH, KW, STR, PAD;
     reg [ADDR_WIDTH-1:0] HW;          // = H*W
 
@@ -87,7 +91,7 @@ module im2col #(
     wire last_elem = (kw == KW - 4'd1) && (kh == KH - 4'd1) &&
                      (cc == C - {{(DIM_WIDTH-1){1'b0}},1'b1}) &&
                      (wo == Wout - {{(DIM_WIDTH-1){1'b0}},1'b1}) &&
-                     (ho == Hout - {{(DIM_WIDTH-1){1'b0}},1'b1});
+                     (ho == ho_last);
 
     always @(posedge pi_clk or negedge pi_rst_n) begin
         if (!pi_rst_n) begin
@@ -109,9 +113,10 @@ module im2col #(
                 if (pi_start) begin
                     H    <= pi_H;   W    <= pi_W;   C   <= pi_C;
                     KH   <= pi_KH;  KW   <= pi_KW;  STR <= pi_stride; PAD <= pi_pad;
-                    Hout <= pi_H_out; Wout <= pi_W_out;
+                    Wout <= pi_W_out;
+                    ho_last <= pi_ho_start + pi_ho_count - {{(DIM_WIDTH-1){1'b0}},1'b1};
                     HW   <= pi_H * pi_W;
-                    ho <= 0; wo <= 0; cc <= 0; kh <= 0; kw <= 0;
+                    ho <= pi_ho_start; wo <= 0; cc <= 0; kh <= 0; kw <= 0;
                     wr_addr <= {ADDR_WIDTH{1'b0}};
                     po_busy <= 1'b1;
                     state   <= S_READ;

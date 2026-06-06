@@ -48,7 +48,7 @@ module control_unit #(
     output wire                          po_loading,
 
     // ── AXIS master (accelerator → DMA) ──────────────────────────
-    output wire [9:0]                    po_num_out_transfers,
+    output wire [15:0]                   po_num_out_transfers,
     output wire [31:0]                   po_out_data,
     output wire                          po_out_write_req,
     input  wire                          pi_out_write_done,
@@ -116,8 +116,10 @@ module control_unit #(
     reg [3:0] state;
 
     // ── Phase 2a: im2col datapath (scratchpad 16-bit + im2col engine) ──
-    localparam integer SP_DEPTH  = 2048;
-    localparam [10:0]  SP_A_BASE = 11'd1024;       // FM ở 0..1023, A ở 1024..
+    // Blocking: load FM 1 lần; lặp nội bộ từng output-row ho (HO_BLK=1 ho/block),
+    // mỗi block im2col sinh Wout hàng A → SEND ra. A region tái dùng mỗi block.
+    localparam integer SP_DEPTH  = 4096;           // addr 12-bit
+    localparam [11:0]  SP_A_BASE = 12'd1024;       // FM ở 0..1023, A ở 1024..
 
     // Unpack config
     wire [7:0] ic_H    = pi_im2col_cfg0[7:0];
@@ -134,14 +136,15 @@ module control_unit #(
     reg  [15:0] fm_idx;     // index ghi FM linear
     reg  [15:0] fm_hi;      // nửa cao word AXIS đang chờ ghi
     reg         ic_start;
-    reg  [10:0] a_word;     // index word khi gửi A ra
+    reg  [11:0] a_word;     // index word trong block khi gửi A ra
     reg  [15:0] send_lo;    // nửa thấp A đang pack
+    reg  [7:0]  ho_cur;     // block ho hiện tại
 
-    // Số element A = M*K = (Hout*Wout)*(C*KH*KW); số word = ceil(MK/2).
-    wire [15:0] a_m      = ic_Hout * ic_Wout;
-    wire [15:0] a_k      = ic_C * ic_KH * ic_KW;
-    wire [19:0] a_total  = a_m * a_k;
-    wire [9:0]  a_nwords = (a_total[19:0] + 20'd1) >> 1;
+    // 1 block (1 ho-row) = Wout hàng A × K element. a_nwords = word/block.
+    wire [15:0] a_k       = ic_C * ic_KH * ic_KW;
+    wire [19:0] blk_elems = ic_Wout * a_k;
+    wire [15:0] a_nwords  = (blk_elems + 20'd1) >> 1;       // word / block (SEND loop)
+    wire [15:0] tot_words = ic_Hout * a_nwords;             // total (TLAST shim)
 
     // im2col ↔ scratchpad wires
     wire        ic_fm_rd_en;  wire [15:0] ic_fm_rd_addr;
@@ -149,41 +152,41 @@ module control_unit #(
     wire        ic_busy, ic_done;
     wire [15:0] sp_rd_data;
 
-    // scratchpad write port mux: IM2COL_RUN → im2col A; LOAD_FM(_HI) → FM load
-    reg         sp_wr_en;  reg [10:0] sp_wr_addr;  reg [15:0] sp_wr_data;
+    // scratchpad write mux: IM2COL_RUN → im2col A; LOAD_FM(_HI) → FM load
+    reg         sp_wr_en;  reg [11:0] sp_wr_addr;  reg [15:0] sp_wr_data;
     always @(*) begin
         if (state == ST_IM2COL_RUN) begin
             sp_wr_en   = ic_a_wr_en;
-            sp_wr_addr = SP_A_BASE + ic_a_wr_addr[10:0];
+            sp_wr_addr = SP_A_BASE + ic_a_wr_addr[11:0];
             sp_wr_data = ic_a_wr_data;
         end else if (state == ST_LOAD_FM) begin
             sp_wr_en   = pi_stream_valid;
-            sp_wr_addr = fm_idx[10:0];
+            sp_wr_addr = fm_idx[11:0];
             sp_wr_data = pi_stream_data[15:0];
         end else if (state == ST_LOAD_FM_HI) begin
             sp_wr_en   = 1'b1;
-            sp_wr_addr = fm_idx[10:0];
+            sp_wr_addr = fm_idx[11:0];
             sp_wr_data = fm_hi;
         end else begin
             sp_wr_en   = 1'b0;
-            sp_wr_addr = 11'd0;
+            sp_wr_addr = 12'd0;
             sp_wr_data = 16'd0;
         end
     end
-    reg         sp_rd_en;  reg [10:0] sp_rd_addr;
+    reg         sp_rd_en;  reg [11:0] sp_rd_addr;
     always @(*) begin
         if (state == ST_IM2COL_RUN) begin
             sp_rd_en   = ic_fm_rd_en;
-            sp_rd_addr = ic_fm_rd_addr[10:0];
+            sp_rd_addr = ic_fm_rd_addr[11:0];
         end else if (state == ST_SEND_A_R0) begin
             sp_rd_en   = 1'b1;
             sp_rd_addr = SP_A_BASE + {a_word, 1'b0};          // 2w
         end else if (state == ST_SEND_A_R1) begin
             sp_rd_en   = 1'b1;
-            sp_rd_addr = SP_A_BASE + {a_word, 1'b0} + 11'd1;  // 2w+1
+            sp_rd_addr = SP_A_BASE + {a_word, 1'b0} + 12'd1;  // 2w+1
         end else begin
             sp_rd_en   = 1'b0;
-            sp_rd_addr = 11'd0;
+            sp_rd_addr = 12'd0;
         end
     end
 
@@ -199,7 +202,8 @@ module control_unit #(
         .pi_clk(pi_clk), .pi_rst_n(pi_rst_n), .pi_start(ic_start),
         .po_busy(ic_busy), .po_done(ic_done),
         .pi_H(ic_H), .pi_W(ic_W), .pi_C(ic_C), .pi_KH(ic_KH), .pi_KW(ic_KW),
-        .pi_stride(ic_str), .pi_pad(ic_pad), .pi_H_out(ic_Hout), .pi_W_out(ic_Wout),
+        .pi_stride(ic_str), .pi_pad(ic_pad),
+        .pi_ho_start(ho_cur), .pi_ho_count(8'd1), .pi_W_out(ic_Wout),
         .po_fm_rd_en(ic_fm_rd_en), .po_fm_rd_addr(ic_fm_rd_addr), .pi_fm_rd_data(sp_rd_data),
         .po_a_wr_en(ic_a_wr_en), .po_a_wr_addr(ic_a_wr_addr), .po_a_wr_data(ic_a_wr_data)
     );
@@ -262,8 +266,8 @@ module control_unit #(
                                   (state == ST_LOAD_FM);
     assign po_stream_ready      = po_loading;
     assign po_out_write_req     = (state == ST_SEND_OUT) || (state == ST_SEND_A_TX);
-    assign po_num_out_transfers = pi_im2col_mode ? a_nwords :
-                                  (pi_tile_m_size * ((pi_tile_n_size + 10'd1) >> 1));
+    assign po_num_out_transfers = pi_im2col_mode ? tot_words :
+                                  {6'd0, (pi_tile_m_size * ((pi_tile_n_size + 10'd1) >> 1))};
     assign po_out_data          = (state == ST_SEND_A_TX) ?
                                   {sp_rd_data, send_lo} :
                                   {out_buf[send_row[2:0]][{send_pair[2:0], 1'b1}],
@@ -335,8 +339,9 @@ module control_unit #(
             fm_idx                <= 16'd0;
             fm_hi                 <= 16'd0;
             ic_start              <= 1'b0;
-            a_word                <= 11'd0;
+            a_word                <= 12'd0;
             send_lo               <= 16'd0;
+            ho_cur                <= 8'd0;
         end else begin
             // ── Default deassertions (chỉ pulse khi cần) ──
             po_dp_weight_load <= 1'b0;
@@ -355,6 +360,7 @@ module control_unit #(
                         // Phase 2a: chế độ im2col — nạp feature map → scratchpad.
                         state  <= ST_LOAD_FM;
                         fm_idx <= 16'd0;
+                        ho_cur <= 8'd0;
                     end else if (pi_skip_w_load) begin
                         // 1a-ii: giữ weight cũ trong array → bỏ thẳng sang LOAD_BIAS.
                         state     <= ST_LOAD_BIAS;
@@ -397,7 +403,7 @@ module control_unit #(
             // ─────────── IM2COL: chạy engine (FM→A trong scratchpad) ──────
             ST_IM2COL_RUN: begin
                 if (ic_done) begin
-                    a_word <= 11'd0;
+                    a_word <= 12'd0;
                     state  <= ST_SEND_A_R0;
                 end
             end
@@ -412,10 +418,18 @@ module control_unit #(
             end
             ST_SEND_A_TX: begin           // po_out_data={sp_rd_data(=A[2w+1]),send_lo}
                 if (pi_out_write_done) begin
-                    if (a_word + 11'd1 >= {1'b0, a_nwords}) begin
-                        state <= ST_DONE;
+                    if (a_word + 12'd1 >= a_nwords[11:0]) begin
+                        // hết word của block này → sang block ho kế hoặc xong
+                        if (ho_cur + 8'd1 >= ic_Hout) begin
+                            state <= ST_DONE;
+                        end else begin
+                            ho_cur   <= ho_cur + 8'd1;
+                            a_word   <= 12'd0;
+                            ic_start <= 1'b1;       // im2col block ho kế
+                            state    <= ST_IM2COL_RUN;
+                        end
                     end else begin
-                        a_word <= a_word + 11'd1;
+                        a_word <= a_word + 12'd1;
                         state  <= ST_SEND_A_R0;
                     end
                 end

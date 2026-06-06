@@ -107,7 +107,7 @@ module accelerator_top_tb;
     );
 
     // -------- Capture buffer (always tready, latch words on handshake) --------
-    reg  [31:0] capture_buf [0:255];
+    reg  [31:0] capture_buf [0:1023];
     integer     capture_count;
     reg         capture_enable;
     reg         capture_reset;       // sync reset cho counter (giữa tile, no DUT reset)
@@ -813,15 +813,16 @@ module accelerator_top_tb;
     //   Cấu hình im2col, stream feature map vào, im2col chạy trong accelerator,
     //   verify ma trận A trong scratchpad (hierarchical peek) khớp golden.
     // ─────────────────────────────────────────────────────────────
-    task automatic run_im2col_check();
-        integer Hh, Ww, Cc, KHh, KWw, strr, padd, Hout, Wout, K, M;
+    task automatic run_im2col_check(input integer Hh, Ww, Cc, KHh, KWw, strr, padd);
+        integer Hout, Wout, K, M;
         integer i, ho, wo, c, ik, iw, hin, win, row, col, nwords, local_errs;
-        reg [15:0] fm   [0:255];
-        reg [15:0] gold [0:511];
+        reg [15:0] fm   [0:511];
+        reg [15:0] gold [0:2047];
         reg [31:0] cfg0, cfg1;
         reg [15:0] got, exp;
 
-        Hh=4; Ww=4; Cc=1; KHh=2; KWw=2; strr=1; padd=0; Hout=3; Wout=3;
+        Hout = (Hh + 2*padd - KHh)/strr + 1;
+        Wout = (Ww + 2*padd - KWw)/strr + 1;
         K = Cc*KHh*KWw; M = Hout*Wout;
 
         for (i=0;i<Cc*Hh*Ww;i=i+1) fm[i] = 16'h0100 + i;
@@ -963,9 +964,11 @@ module accelerator_top_tb;
 
         // ─────────── Case 10: HW im2col mode (Phase 2a) ───────────
         $display("");
-        $display("==== Case 10: HW im2col mode ====");
+        $display("==== Case 10: HW im2col mode (blocking) ====");
         reset_dut();
-        run_im2col_check();
+        run_im2col_check(4, 4, 1, 2, 2, 1, 0);    // 3 block
+        reset_dut();
+        run_im2col_check(8, 8, 2, 3, 3, 1, 0);    // 6 block, multi-channel
 
         // ─────────── Summary ───────────
         $display("");
