@@ -83,6 +83,23 @@ static inline void lstamp(uint32_t idx)
     }
 }
 
+/* Phase 3a: FC qua OS dataflow (util 100%). OS clear bias=0 → cộng bias + act
+ * trong SW (rẻ: N nhỏ). Q1.4.11, saturate int16 như post_proc HW. */
+static int fc_os(uint32_t a, uint32_t w, uint32_t bias, uint32_t c,
+                 uint32_t K, uint32_t N, int relu)
+{
+    int rc = gemm_os(a, w, c, K, N, RAAS_CFG_ACT_BYPASS);   /* c = A·W (Q1.4.11) */
+    if (rc < 0) return rc;
+    for (uint32_t n = 0; n < N; n++) {
+        int32_t v = (int32_t)rd16(c + n * 2u) + (int32_t)rd16(bias + n * 2u);
+        if (relu && v < 0) v = 0;
+        if (v >  32767) v =  32767;
+        if (v < -32768) v = -32768;
+        wr16(c + n * 2u, (int16_t)v);
+    }
+    return 0;
+}
+
 int lenet5_infer(int use_hw)
 {
     /* Shorthand addresses */
@@ -178,12 +195,13 @@ int lenet5_infer(int use_hw)
      * FMAP_B [256] → FMAP_A [120]
      * ──────────────────────────────────────────────────────────────── */
     LDBG(5);
-    rc = (use_hw ? gemm_tiled : gemm_sw)(fmap_b,
-               LENET_ADDR(LENET_DDR_FC1_W_OFF),
-               LENET_ADDR(LENET_DDR_FC1_BIAS_OFF),
-               fmap_a,
-               1u, LENET_FC1_IN, LENET_FC1_OUT,
-               RAAS_CFG_ACT_RELU);
+    rc = use_hw
+        ? fc_os(fmap_b, LENET_ADDR(LENET_DDR_FC1_W_OFF),
+                LENET_ADDR(LENET_DDR_FC1_BIAS_OFF), fmap_a,
+                LENET_FC1_IN, LENET_FC1_OUT, 1)
+        : gemm_sw(fmap_b, LENET_ADDR(LENET_DDR_FC1_W_OFF),
+                  LENET_ADDR(LENET_DDR_FC1_BIAS_OFF), fmap_a,
+                  1u, LENET_FC1_IN, LENET_FC1_OUT, RAAS_CFG_ACT_RELU);
     if (rc < 0) return rc;
 
     lstamp(5);  /* FC1 done */
@@ -192,12 +210,13 @@ int lenet5_infer(int use_hw)
      * FMAP_A [120] → FMAP_B [84]
      * ──────────────────────────────────────────────────────────────── */
     LDBG(6);
-    rc = (use_hw ? gemm_tiled : gemm_sw)(fmap_a,
-               LENET_ADDR(LENET_DDR_FC2_W_OFF),
-               LENET_ADDR(LENET_DDR_FC2_BIAS_OFF),
-               fmap_b,
-               1u, LENET_FC2_IN, LENET_FC2_OUT,
-               RAAS_CFG_ACT_RELU);
+    rc = use_hw
+        ? fc_os(fmap_a, LENET_ADDR(LENET_DDR_FC2_W_OFF),
+                LENET_ADDR(LENET_DDR_FC2_BIAS_OFF), fmap_b,
+                LENET_FC2_IN, LENET_FC2_OUT, 1)
+        : gemm_sw(fmap_a, LENET_ADDR(LENET_DDR_FC2_W_OFF),
+                  LENET_ADDR(LENET_DDR_FC2_BIAS_OFF), fmap_b,
+                  1u, LENET_FC2_IN, LENET_FC2_OUT, RAAS_CFG_ACT_RELU);
     if (rc < 0) return rc;
 
     lstamp(6);  /* FC2 done */
@@ -206,12 +225,11 @@ int lenet5_infer(int use_hw)
      * FMAP_B [84] → FMAP_A [10]
      * ──────────────────────────────────────────────────────────────── */
     LDBG(7);
-    rc = gemm_tiled(fmap_b,
+    rc = fc_os(fmap_b,
                LENET_ADDR(LENET_DDR_FC3_W_OFF),
                LENET_ADDR(LENET_DDR_FC3_BIAS_OFF),
                fmap_a,
-               1u, LENET_FC3_IN, LENET_FC3_OUT,
-               RAAS_CFG_ACT_RELU);
+               LENET_FC3_IN, LENET_FC3_OUT, 1);
     if (rc < 0) return rc;
 
     lstamp(7);  /* FC3 done */

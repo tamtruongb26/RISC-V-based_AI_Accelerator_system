@@ -65,6 +65,11 @@
  *   CFG1 = (pad<<20)|(stride<<16)|(Wout<<8)|Hout */
 #define RAAS_CFG_IM2COL_MODE     (1u << 21)
 
+/* Phase 3a: OS dataflow mode (CFG bit 22) — FC layer, util 12.5%→100%.
+ *   Stream: weight tile (32 word) + a-vector (4 word), KHÔNG bias (SW bias).
+ *   Cộng dồn K-tile qua ACC_ACCUM/POST_SKIP. */
+#define RAAS_CFG_OS_MODE         (1u << 22)
+
 /* Phase 1a-ii: data reuse (CFG spare bit).
  *   [17]    SKIP_W_LOAD : 1 = giữ weight cũ trong array (bỏ LOAD_W), 0 = nạp weight
  *   [19:18] ACC_SLOT    : output-tile slot trong accumulator (blocking, 0..3) */

@@ -35,6 +35,13 @@ int gemm_tiled(uint32_t a_addr, uint32_t w_addr, uint32_t b_addr,
                uint32_t act_mode);
 
 /*
+ * gemm_os — Phase 3a Output-Stationary GEMM cho FC (M=1). C[1×N]=A[1×K]×W[K×N].
+ * Util 12.5%→100% (64 MAC/cycle). Không bias (cộng SW nếu cần).
+ */
+int gemm_os(uint32_t a_addr, uint32_t w_addr, uint32_t c_addr,
+            uint32_t K, uint32_t N, uint32_t act_mode);
+
+/*
  * gemm_sw — Pure software matrix multiply on PicoRV32.
  * Same signature as gemm_tiled, used for benchmarking.
  */
