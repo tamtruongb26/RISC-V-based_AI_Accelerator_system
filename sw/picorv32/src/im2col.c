@@ -22,6 +22,11 @@
 
 #include "im2col.h"
 #include "io.h"
+#include "accel.h"
+#include "dma.h"
+
+#define IM2COL_DMA_TIMEOUT    2000000u
+#define IM2COL_ACCEL_TIMEOUT  2000000u
 
 /* ── Helper: read/write Q1.4.11 from DDR ───────────────────────────── */
 static inline int16_t rd16(uint32_t addr)
@@ -84,4 +89,36 @@ void im2col(uint32_t in_addr, uint32_t out_addr,
             row++;
         }
     }
+}
+
+/* ── HW im2col (Phase 2a) ───────────────────────────────────────────────
+ * Đẩy việc im2col xuống accelerator (Vấn đề 3b). Drop-in cho im2col() SW.
+ * Accelerator tự block theo output-row → fire-once: config + start, DMA FM vào,
+ * DMA ma trận A ra DDR. pad=0 (LeNet conv valid).
+ * Return 0 OK, <0 timeout. */
+int im2col_hw(uint32_t in_addr, uint32_t out_addr,
+              uint32_t C, uint32_t H, uint32_t W,
+              uint32_t kH, uint32_t kW, uint32_t stride)
+{
+    const uint32_t pad = 0u;
+    uint32_t Hout = (H + 2u*pad - kH) / stride + 1u;
+    uint32_t Wout = (W + 2u*pad - kW) / stride + 1u;
+    uint32_t fm_bytes = C * H * W * 2u;
+    uint32_t a_bytes  = Hout * Wout * C * kH * kW * 2u;
+    int rc;
+
+    uint32_t cfg0 = (kW << 28) | (kH << 24) | (C << 16) | (W << 8) | H;
+    uint32_t cfg1 = (pad << 20) | (stride << 16) | (Wout << 8) | Hout;
+
+    accel_im2col_config(cfg0, cfg1);
+    dma_reset();
+    accel_start_im2col();                 /* → LOAD_FM, chờ AXIS */
+    dma_s2mm_recv(out_addr, a_bytes);     /* arm nhận ma trận A */
+
+    rc = dma_mm2s_send_and_wait(in_addr, fm_bytes, IM2COL_DMA_TIMEOUT);
+    if (rc < 0) return rc;
+    rc = accel_wait_done(IM2COL_ACCEL_TIMEOUT);
+    if (rc < 0) return rc;
+    rc = dma_s2mm_wait(IM2COL_DMA_TIMEOUT);
+    return rc;
 }

@@ -45,6 +45,14 @@ void accel_configure_and_start(uint32_t M, uint32_t K, uint32_t N, uint32_t act_
 void accel_configure_and_start_flags(uint32_t M, uint32_t K, uint32_t N,
                                      uint32_t act_mode, uint32_t flags);
 
+/* ── Phase 2a: HW im2col mode ──────────────────────────────────────────── */
+
+/* Ghi 2 register cấu hình im2col (IM2COL_CFG0/CFG1 đã pack sẵn). */
+void accel_im2col_config(uint32_t cfg0, uint32_t cfg1);
+
+/* Start chế độ im2col (CFG = IM2COL_MODE | START, 1 write). */
+void accel_start_im2col(void);
+
 /* ── Status polling ────────────────────────────────────────────────────── */
 
 /* Poll STATUS.DONE bit cho đến khi set, hoặc timeout.

@@ -51,6 +51,21 @@ void accel_configure_and_start_flags(uint32_t M, uint32_t K, uint32_t N,
     fence_iorw();
 }
 
+/* ── Phase 2a: HW im2col mode ──────────────────────────────────────────── */
+
+void accel_im2col_config(uint32_t cfg0, uint32_t cfg1)
+{
+    accel_write(RAAS_ACCEL_IM2COL_CFG0, cfg0);
+    accel_write(RAAS_ACCEL_IM2COL_CFG1, cfg1);
+    fence_iorw();
+}
+
+void accel_start_im2col(void)
+{
+    accel_write(RAAS_ACCEL_CFG, RAAS_CFG_IM2COL_MODE | RAAS_CFG_START_BIT);
+    fence_iorw();
+}
+
 /* ── Status polling ────────────────────────────────────────────────────── */
 
 int accel_wait_done(uint32_t timeout_cycles)

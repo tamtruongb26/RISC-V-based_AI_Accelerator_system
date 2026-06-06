@@ -37,6 +37,8 @@
 #define RAAS_ACCEL_CNT_SEL       0x08u   /* R/W  [3:0]=counter index        */
 #define RAAS_ACCEL_STATUS        0x0Cu   /* R    [0]=BUSY, [1]=DONE         */
 #define RAAS_ACCEL_CNT_VAL       0x10u   /* R    32-bit counter[CNT_SEL]    */
+#define RAAS_ACCEL_IM2COL_CFG0   0x14u   /* R/W  {KW,KH,C,W,H} packed       */
+#define RAAS_ACCEL_IM2COL_CFG1   0x18u   /* R/W  {pad,stride,Wout,Hout}     */
 
 /* CONFIG_PACKED bit fields:
  *   [3:0]   = M_size  (1..8)
@@ -57,6 +59,11 @@
  * Mặc định (bit=0) = behavior cũ (ghi đè + post_proc). */
 #define RAAS_CFG_ACC_ACCUM       (1u << 15)
 #define RAAS_CFG_POST_SKIP       (1u << 16)
+
+/* Phase 2a: HW im2col mode (CFG bit 21). Params ở IM2COL_CFG0/CFG1.
+ *   CFG0 = (kW<<28)|(kH<<24)|(C<<16)|(W<<8)|H
+ *   CFG1 = (pad<<20)|(stride<<16)|(Wout<<8)|Hout */
+#define RAAS_CFG_IM2COL_MODE     (1u << 21)
 
 /* Phase 1a-ii: data reuse (CFG spare bit).
  *   [17]    SKIP_W_LOAD : 1 = giữ weight cũ trong array (bỏ LOAD_W), 0 = nạp weight

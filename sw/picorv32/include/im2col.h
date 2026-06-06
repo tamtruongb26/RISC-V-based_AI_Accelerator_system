@@ -27,4 +27,10 @@ void im2col(uint32_t in_addr, uint32_t out_addr,
             uint32_t C, uint32_t H, uint32_t W,
             uint32_t kH, uint32_t kW, uint32_t stride);
 
+/* HW im2col (Phase 2a) — đẩy xuống accelerator. Drop-in cho im2col() SW.
+ * Return 0 OK, <0 timeout (DMA/accel). pad=0. */
+int im2col_hw(uint32_t in_addr, uint32_t out_addr,
+              uint32_t C, uint32_t H, uint32_t W,
+              uint32_t kH, uint32_t kW, uint32_t stride);
+
 #endif /* IM2COL_H */

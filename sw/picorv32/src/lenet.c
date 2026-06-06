@@ -107,9 +107,14 @@ int lenet5_infer(int use_hw)
      * HWC→CHW transpose → FMAP_B [6×24×24]
      * ──────────────────────────────────────────────────────────────── */
     LDBG(1);
-    im2col(image, im2col_buf,
-           LENET_CONV1_C_IN, LENET_CONV1_H_IN, LENET_CONV1_W_IN,
-           LENET_CONV1_KH, LENET_CONV1_KW, 1u);
+    if (use_hw)
+        im2col_hw(image, im2col_buf,
+                  LENET_CONV1_C_IN, LENET_CONV1_H_IN, LENET_CONV1_W_IN,
+                  LENET_CONV1_KH, LENET_CONV1_KW, 1u);
+    else
+        im2col(image, im2col_buf,
+               LENET_CONV1_C_IN, LENET_CONV1_H_IN, LENET_CONV1_W_IN,
+               LENET_CONV1_KH, LENET_CONV1_KW, 1u);
 
     rc = (use_hw ? gemm_tiled : gemm_sw)(im2col_buf,
                LENET_ADDR(LENET_DDR_CONV1_W_OFF),
@@ -138,9 +143,14 @@ int lenet5_infer(int use_hw)
      * HWC→CHW transpose → FMAP_A [16×8×8]
      * ──────────────────────────────────────────────────────────────── */
     LDBG(3);
-    im2col(fmap_a, im2col_buf,
-           LENET_CONV2_C_IN, LENET_CONV2_H_IN, LENET_CONV2_W_IN,
-           LENET_CONV2_KH, LENET_CONV2_KW, 1u);
+    if (use_hw)
+        im2col_hw(fmap_a, im2col_buf,
+                  LENET_CONV2_C_IN, LENET_CONV2_H_IN, LENET_CONV2_W_IN,
+                  LENET_CONV2_KH, LENET_CONV2_KW, 1u);
+    else
+        im2col(fmap_a, im2col_buf,
+               LENET_CONV2_C_IN, LENET_CONV2_H_IN, LENET_CONV2_W_IN,
+               LENET_CONV2_KH, LENET_CONV2_KW, 1u);
 
     rc = (use_hw ? gemm_tiled : gemm_sw)(im2col_buf,
                LENET_ADDR(LENET_DDR_CONV2_W_OFF),
