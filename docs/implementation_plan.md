@@ -18,9 +18,31 @@ Plan này triển khai **3 trụ contribution** trên nền hệ thống hiện 
 
 ## Progress Status
 
-Cập nhật: **2026-05-24**.
+Cập nhật: **2026-06-06**. Tag git: `v-baseline` (P0), `v-phase1a`, `v-phase2a` (đã push).
+Cách làm: **incremental + simulation** (không board → verify chức năng bằng xsim,
+area/timing bằng OOC synth; firmware compile-verify). Chi tiết: `docs/innovations_summary.md`,
+`docs/phase1a_design.md`, `docs/synth_results.md`, `docs/autonomous_accel_design.md`.
 
-### Đã hoàn thành
+### Đã hoàn thành (verify sim + synth; runtime cần board)
+
+- [x] **Phase 1a — Scratchpad + Accumulator + Data reuse** (tag `v-phase1a`)
+  - [x] `scratchpad.v`, `accumulator.v` + unit testbench (sim PASS)
+  - [x] 1a-i: HW K-accumulation (Vấn đề 3a) — CFG spare bit, full-precision 40-bit
+  - [x] 1a-ii A-D: weight reuse (SKIP_W_LOAD), multi-slot accumulator (blocking),
+        SKIP_IN_LOAD — control qua CFG[15:20], không thêm register/không đụng BD
+  - [x] Firmware `gemm_tile.c` dùng HW K-acc (compile pass)
+  - [x] OOC synth: LUT 17%, FF 12%, DSP 67, WNS @100MHz +8.68ns
+- [x] **Phase 2a — HW im2col** (tag `v-phase2a`, Vấn đề 3b)
+  - [x] `im2col.v` (sliding-window FSM) + unit testbench (padding/multi-channel/stride)
+  - [x] Tích hợp vào accelerator: chế độ IM2COL (CFG[21]) — FM→scratchpad→im2col→A→SEND
+  - [x] **Blocking**: load FM 1 lần, lặp nội bộ ho-block, A real-scale (num_transfers 16-bit)
+  - [x] Firmware `im2col_hw()` + lenet.c (compile pass)
+  - [x] OOC synth: LUT 20%, FF 12.6%, DSP 72, WNS +8.39ns
+- [x] **Phase 1b foundation** — tách scratchpad FM/A (nền double-buffer; overlap 2-lane chưa làm)
+
+### Phase 0 — Đã hoàn thành
+
+- [x] **Phase 0a — HDL instrumentation + register pack** (HDL only)
 
 - [x] **Phase 0a — HDL instrumentation + register pack** (HDL only)
   - [x] Per-state cycle counters trong `control_unit.v` (9 counters)
@@ -63,29 +85,28 @@ Cập nhật: **2026-05-24**.
 
 ### Chưa bắt đầu
 
-- [ ] Phase 1a — Scratchpad + Accumulator (foundation, không thể bỏ)
-- [ ] Phase 1b — Double buffering
-- [ ] Phase 2a — HW im2col
-- [ ] Phase 2b — HW pool
-- [ ] Phase 2c — CISC loop descriptor
+- [ ] Phase 1b — Double buffering (overlap 2-lane; foundation đã xong)
+- [ ] Phase 2b — HW pool (cần line-buffer cửa sổ 2×2)
+- [ ] Phase 2c — CISC loop descriptor (autonomy — T2, đụng block design)
 - [ ] Phase 3a — OS dataflow mode
 - [ ] Phase 4 — Sparsity zero-skip
-- [ ] Phase 5a — Fault injection framework
+- [ ] Phase 5a — Fault injection framework (trụ Reliability — chưa đụng)
 - [ ] Phase 5b — TMR control FSM
 - [ ] Phase 5c — ECC scratchpad
 - [ ] Phase 6 — Generic firmware + model descriptor
 - [ ] Phase 7 — Final evaluation + writeup
+- [ ] Đo board (latency/power/accuracy + data reuse APM) — mọi số hiệu năng
 
 ## Timeline tổng quan
 
 | Phase | Tuần | Module | Status |
 |---|---|---|---|
-| 0 — Baseline + Instrumentation + Cleanup | 1-2 | Counter, APM, register pack (6a), operator library (8a), interrupt (3d) | **~70% done** (HDL+BD+FW xong; chờ Vitis + board measurement; IRQ + ops refactor + scripts ở next increment) |
-| 1a — Scratchpad + Accumulator | 3-5 | `scratchpad.v`, `accumulator.v` | Chưa bắt đầu |
-| 1b — Double buffering | 6 | Ping-pong banks | Chưa bắt đầu |
-| 2a — HW im2col | 7-8 | `im2col.v` | Chưa bắt đầu |
+| 0 — Baseline + Instrumentation + Cleanup | 1-2 | Counter, APM, register pack (6a) | **HDL/BD/FW xong** (chờ board measurement; IRQ/ops refactor/scripts còn nợ) |
+| 1a — Scratchpad + Accumulator | 3-5 | `scratchpad.v`, `accumulator.v` | **✅ DONE** (sim+synth, `v-phase1a`) |
+| 1b — Double buffering | 6 | Ping-pong banks | **Foundation xong** (tách SP); overlap 2-lane chưa |
+| 2a — HW im2col | 7-8 | `im2col.v` | **✅ DONE** (sim+synth+firmware, blocking, `v-phase2a`) |
 | 2b — HW pool | 9 | `post_proc.v` extended | Chưa bắt đầu |
-| 2c — CISC loop descriptor | 10-11 | Outer loop FSM | Chưa bắt đầu |
+| 2c — CISC loop descriptor | 10-11 | Outer loop FSM | Chưa bắt đầu (autonomy — đụng BD) |
 | 3a — OS dataflow mode | 12-14 | `pe.v`, `data_path.v` dual-mode | Chưa bắt đầu |
 | 4 — Sparsity zero-skip | 15 | `pe.v` operand isolation | Chưa bắt đầu |
 | 5a — Fault injection framework | 16 | `fault_injector.v` | Chưa bắt đầu |

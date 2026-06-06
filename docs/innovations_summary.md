@@ -142,8 +142,8 @@ Plan không nói cách verify chi tiết. Thực tế dùng **tính chất bất
 
 | Phase | Nội dung | Trạng thái |
 |---|---|---|
-| **1b** | Double-buffering — pipeline Load‖Exec, ping-pong 2-bank scratchpad | Chưa bắt đầu |
-| **2a** | HW im2col (`im2col.v`) — bỏ im2col SW (Vấn đề 3b) | Chưa |
+| **2a** | HW im2col (`im2col.v`) — bỏ im2col SW (Vấn đề 3b) | **✅ DONE** (module+integration+SEND_A+blocking+firmware, sim 7/7 + synth, `v-phase2a`) |
+| **1b** | Double-buffering — pipeline Load‖Exec, ping-pong 2-bank scratchpad | **Foundation** (tách scratchpad FM/A); overlap 2-lane chưa |
 | **2b** | HW pool (stage trong `post_proc.v`) — bỏ maxpool SW (3c) | Chưa |
 | **2c** | CISC loop descriptor — accelerator tự DMA, firmware fire-and-forget (6b) | Chưa |
 | **3a** | OS dataflow mode cho FC — kéo PE util FC 12.5%→≥80% (Vấn đề 1) | Chưa |
