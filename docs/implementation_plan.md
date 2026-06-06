@@ -49,8 +49,12 @@ area/timing bằng OOC synth; firmware compile-verify). Chi tiết: `docs/innova
   - [x] `ecc_scratchpad.v` — memory chịu lỗi (ECC encode/decode + fault inj), tự sửa
   - [x] Area OOC: hardening <0.5% LUT ZU3EG (xem `synth_results.md`) → vượt tiêu chí
   - [ ] Integration vào accelerator thật (FSM state TMR, scratchpad ECC) + `fault_sweep.py` → 4 resilience curve
-- [x] **Phase 2b — HW maxpool** (`maxpool2x2.v`, Vấn đề 3c) — module verified sim
-      (4 case signed, multi-channel); integration (POOL mode) chưa
+- [x] **Phase 2b — HW maxpool** (`maxpool2x2.v`, Vấn đề 3c) — END-TO-END:
+  - [x] `maxpool2x2.v` engine + unit sim (4 case signed, multi-channel)
+  - [x] POOL_MODE (CFG[23]) integration: tái dùng LOAD_FM + scratchpad + SEND; sim
+        4×4×1 + 8×8×2 khớp golden 2×2 max
+  - [x] Firmware `pool_hw` + `accel_start_pool`; Pool1/Pool2 dùng POOL mode; build clean
+  → Cùng im2col + OS: toàn bộ Conv/Pool/FC chạy trên accelerator
 - [x] **Phase 3a — OS dataflow** (`os_array.v`, Vấn đề 1: FC underutilization) — END-TO-END:
   - [x] `os_array.v` engine (64 MAC/cycle, K→hàng N→cột) + unit sim
   - [x] OS_MODE (CFG[22]) integration: states OS_LOAD_W/A/FEED/DRAIN + os_array trong
@@ -120,7 +124,7 @@ area/timing bằng OOC synth; firmware compile-verify). Chi tiết: `docs/innova
 | 1a — Scratchpad + Accumulator | 3-5 | `scratchpad.v`, `accumulator.v` | **✅ DONE** (sim+synth, `v-phase1a`) |
 | 1b — Double buffering | 6 | Ping-pong banks | **Foundation xong** (tách SP); overlap 2-lane chưa |
 | 2a — HW im2col | 7-8 | `im2col.v` | **✅ DONE** (sim+synth+firmware, blocking, `v-phase2a`) |
-| 2b — HW pool | 9 | `maxpool2x2.v` | **✅ module** (sim 4 case signed); integration chưa |
+| 2b — HW pool | 9 | `maxpool2x2.v` + POOL_MODE | **✅ DONE end-to-end** (module+integration+firmware; sim khớp golden) |
 | 2c — CISC loop descriptor | 10-11 | Outer loop FSM | Chưa bắt đầu (autonomy — đụng BD) |
 | 3a — OS dataflow mode | 12-14 | `os_array.v` + OS_MODE | **✅ DONE end-to-end** (engine+integration+firmware; OS==WS sim; FC util 12.5%→100%) |
 | 4 — Sparsity zero-skip | 15 | `pe.v` operand isolation | **✅ DONE** (functional preserved; power cần SAIF) |
