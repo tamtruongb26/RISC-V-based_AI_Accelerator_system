@@ -847,7 +847,12 @@ module accelerator_top_tb;
         cfg0 = (KWw<<28)|(KHh<<24)|(Cc<<16)|(Ww<<8)|Hh;
         cfg1 = (padd<<20)|(strr<<16)|(Wout<<8)|Hout;
 
+        // Bật capture cho A stream ra (AXIS master)
         @(negedge clk);
+        capture_enable = 1'b0; capture_reset = 1'b1;
+        @(posedge clk); @(negedge clk);
+        capture_reset = 1'b0; capture_enable = 1'b1;
+
         axi_lite_write(5'h14, cfg0);
         axi_lite_write(5'h18, cfg1);
         // CFG: IM2COL_MODE (bit21) + START (bit14)
@@ -858,11 +863,12 @@ module accelerator_top_tb;
             axis_push({fm[2*i+1], fm[2*i]});
 
         wait_done("im2col");
+        @(posedge clk); capture_enable = 1'b0;
 
-        // Peek A region trong scratchpad (bank_a, base 1024)
+        // A streamed out: capture_buf[w] = {A[2w+1], A[2w]}
         local_errs=0;
         for (i=0;i<M*K;i=i+1) begin
-            got = dut.u_ctrl.u_sp.bank_a[11'd1024 + i];
+            got = (i[0]) ? capture_buf[i>>1][31:16] : capture_buf[i>>1][15:0];
             exp = gold[i];
             if (got !== exp) begin
                 if (local_errs<6)
@@ -871,7 +877,8 @@ module accelerator_top_tb;
             end
         end
         if (local_errs==0)
-            $display("[ OK ] im2col-mode: A[%0d×%0d] khớp golden trong scratchpad", M, K);
+            $display("[ OK ] im2col-mode: A[%0d×%0d] stream ra khớp golden (%0d word)",
+                     M, K, capture_count);
         errs = errs + local_errs;
     endtask
 

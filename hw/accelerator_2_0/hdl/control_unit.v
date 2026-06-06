@@ -107,6 +107,9 @@ module control_unit #(
     localparam [3:0] ST_LOAD_FM      = 4'd9;   // AXIS → scratchpad (feature map)
     localparam [3:0] ST_LOAD_FM_HI   = 4'd10;  // ghi nửa cao của word vừa nhận
     localparam [3:0] ST_IM2COL_RUN   = 4'd11;  // im2col đọc FM → ghi A trong scratchpad
+    localparam [3:0] ST_SEND_A_R0    = 4'd12;  // đọc A[2w] từ scratchpad
+    localparam [3:0] ST_SEND_A_R1    = 4'd13;  // đọc A[2w+1], latch A[2w]
+    localparam [3:0] ST_SEND_A_TX    = 4'd14;  // pack 2 phần tử → AXIS master
 
     localparam integer WORDS_PER_ROW = SA_N / 2;   // 4 cho SA_N=8
 
@@ -131,6 +134,14 @@ module control_unit #(
     reg  [15:0] fm_idx;     // index ghi FM linear
     reg  [15:0] fm_hi;      // nửa cao word AXIS đang chờ ghi
     reg         ic_start;
+    reg  [10:0] a_word;     // index word khi gửi A ra
+    reg  [15:0] send_lo;    // nửa thấp A đang pack
+
+    // Số element A = M*K = (Hout*Wout)*(C*KH*KW); số word = ceil(MK/2).
+    wire [15:0] a_m      = ic_Hout * ic_Wout;
+    wire [15:0] a_k      = ic_C * ic_KH * ic_KW;
+    wire [19:0] a_total  = a_m * a_k;
+    wire [9:0]  a_nwords = (a_total[19:0] + 20'd1) >> 1;
 
     // im2col ↔ scratchpad wires
     wire        ic_fm_rd_en;  wire [15:0] ic_fm_rd_addr;
@@ -159,8 +170,22 @@ module control_unit #(
             sp_wr_data = 16'd0;
         end
     end
-    wire        sp_rd_en   = (state == ST_IM2COL_RUN) && ic_fm_rd_en;
-    wire [10:0] sp_rd_addr = ic_fm_rd_addr[10:0];
+    reg         sp_rd_en;  reg [10:0] sp_rd_addr;
+    always @(*) begin
+        if (state == ST_IM2COL_RUN) begin
+            sp_rd_en   = ic_fm_rd_en;
+            sp_rd_addr = ic_fm_rd_addr[10:0];
+        end else if (state == ST_SEND_A_R0) begin
+            sp_rd_en   = 1'b1;
+            sp_rd_addr = SP_A_BASE + {a_word, 1'b0};          // 2w
+        end else if (state == ST_SEND_A_R1) begin
+            sp_rd_en   = 1'b1;
+            sp_rd_addr = SP_A_BASE + {a_word, 1'b0} + 11'd1;  // 2w+1
+        end else begin
+            sp_rd_en   = 1'b0;
+            sp_rd_addr = 11'd0;
+        end
+    end
 
     scratchpad #(.DATA_WIDTH(16), .DEPTH(SP_DEPTH)) u_sp (
         .pi_clk     (pi_clk),
@@ -236,10 +261,12 @@ module control_unit #(
                                   (state == ST_LOAD_IN)     ||
                                   (state == ST_LOAD_FM);
     assign po_stream_ready      = po_loading;
-    assign po_out_write_req     = (state == ST_SEND_OUT);
-    assign po_num_out_transfers = pi_tile_m_size *
-                                  ((pi_tile_n_size + 10'd1) >> 1);
-    assign po_out_data          = {out_buf[send_row[2:0]][{send_pair[2:0], 1'b1}],
+    assign po_out_write_req     = (state == ST_SEND_OUT) || (state == ST_SEND_A_TX);
+    assign po_num_out_transfers = pi_im2col_mode ? a_nwords :
+                                  (pi_tile_m_size * ((pi_tile_n_size + 10'd1) >> 1));
+    assign po_out_data          = (state == ST_SEND_A_TX) ?
+                                  {sp_rd_data, send_lo} :
+                                  {out_buf[send_row[2:0]][{send_pair[2:0], 1'b1}],
                                    out_buf[send_row[2:0]][{send_pair[2:0], 1'b0}]};
 
     // Flatten weight_row_buf → bus tới data_path
@@ -308,6 +335,8 @@ module control_unit #(
             fm_idx                <= 16'd0;
             fm_hi                 <= 16'd0;
             ic_start              <= 1'b0;
+            a_word                <= 11'd0;
+            send_lo               <= 16'd0;
         end else begin
             // ── Default deassertions (chỉ pulse khi cần) ──
             po_dp_weight_load <= 1'b0;
@@ -367,7 +396,29 @@ module control_unit #(
 
             // ─────────── IM2COL: chạy engine (FM→A trong scratchpad) ──────
             ST_IM2COL_RUN: begin
-                if (ic_done) state <= ST_DONE;
+                if (ic_done) begin
+                    a_word <= 11'd0;
+                    state  <= ST_SEND_A_R0;
+                end
+            end
+
+            // ─────────── IM2COL: gửi ma trận A từ scratchpad ra AXIS ──────
+            ST_SEND_A_R0: begin           // issue read A[2w] (qua sp_rd mux)
+                state <= ST_SEND_A_R1;
+            end
+            ST_SEND_A_R1: begin           // sp_rd_data = A[2w]; issue read A[2w+1]
+                send_lo <= sp_rd_data;
+                state   <= ST_SEND_A_TX;
+            end
+            ST_SEND_A_TX: begin           // po_out_data={sp_rd_data(=A[2w+1]),send_lo}
+                if (pi_out_write_done) begin
+                    if (a_word + 11'd1 >= {1'b0, a_nwords}) begin
+                        state <= ST_DONE;
+                    end else begin
+                        a_word <= a_word + 11'd1;
+                        state  <= ST_SEND_A_R0;
+                    end
+                end
             end
 
             // ─────────── LOAD WEIGHTS - RECEIVE ────────────
