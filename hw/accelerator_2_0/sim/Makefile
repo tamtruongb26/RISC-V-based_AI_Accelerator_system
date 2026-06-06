@@ -63,6 +63,9 @@ sim-fault_injector:
 sim-tmr_voter:
 	$(call run_sim,tmr_voter,$(HDL)/tmr_voter.v,)
 
+sim-ecc_secded:
+	$(call run_sim,ecc_secded,$(HDL)/ecc_secded.v,)
+
 sim-pe:
 	$(call run_sim,pe,$(HDL)/pe.v,)
 
@@ -75,7 +78,7 @@ sim-post_proc:
 sim-accelerator_top:
 	$(call run_sim,accelerator_top,$(wildcard $(HDL)/*.v),1)
 
-sim-all: sim-pe sim-data_path sim-post_proc sim-scratchpad sim-accumulator sim-im2col sim-fault_injector sim-tmr_voter sim-accelerator_top
+sim-all: sim-pe sim-data_path sim-post_proc sim-scratchpad sim-accumulator sim-im2col sim-fault_injector sim-tmr_voter sim-ecc_secded sim-accelerator_top
 	@echo ""
 	@echo "════════════════════════════════════════════════════════════"
 	@echo " Toàn bộ unit sim Phase 0 PASS"
