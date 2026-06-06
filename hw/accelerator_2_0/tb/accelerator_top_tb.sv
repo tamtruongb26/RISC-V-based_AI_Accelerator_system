@@ -809,6 +809,73 @@ module accelerator_top_tb;
     endtask
 
     // ─────────────────────────────────────────────────────────────
+    // Case 6: HW im2col mode (Phase 2a integration)
+    //   Cấu hình im2col, stream feature map vào, im2col chạy trong accelerator,
+    //   verify ma trận A trong scratchpad (hierarchical peek) khớp golden.
+    // ─────────────────────────────────────────────────────────────
+    task automatic run_im2col_check();
+        integer Hh, Ww, Cc, KHh, KWw, strr, padd, Hout, Wout, K, M;
+        integer i, ho, wo, c, ik, iw, hin, win, row, col, nwords, local_errs;
+        reg [15:0] fm   [0:255];
+        reg [15:0] gold [0:511];
+        reg [31:0] cfg0, cfg1;
+        reg [15:0] got, exp;
+
+        Hh=4; Ww=4; Cc=1; KHh=2; KWw=2; strr=1; padd=0; Hout=3; Wout=3;
+        K = Cc*KHh*KWw; M = Hout*Wout;
+
+        for (i=0;i<Cc*Hh*Ww;i=i+1) fm[i] = 16'h0100 + i;
+
+        // golden im2col
+        row=0;
+        for (ho=0;ho<Hout;ho=ho+1)
+        for (wo=0;wo<Wout;wo=wo+1) begin
+            col=0;
+            for (c=0;c<Cc;c=c+1)
+            for (ik=0;ik<KHh;ik=ik+1)
+            for (iw=0;iw<KWw;iw=iw+1) begin
+                hin = ho*strr + ik - padd;
+                win = wo*strr + iw - padd;
+                if (hin>=0 && hin<Hh && win>=0 && win<Ww)
+                    gold[row*K+col] = fm[c*Hh*Ww + hin*Ww + win];
+                else gold[row*K+col] = 16'h0;
+                col=col+1;
+            end
+            row=row+1;
+        end
+
+        cfg0 = (KWw<<28)|(KHh<<24)|(Cc<<16)|(Ww<<8)|Hh;
+        cfg1 = (padd<<20)|(strr<<16)|(Wout<<8)|Hout;
+
+        @(negedge clk);
+        axi_lite_write(5'h14, cfg0);
+        axi_lite_write(5'h18, cfg1);
+        // CFG: IM2COL_MODE (bit21) + START (bit14)
+        axi_lite_write(5'h00, (32'h1<<21) | (32'h1<<14));
+
+        nwords = (Cc*Hh*Ww + 1) >> 1;
+        for (i=0;i<nwords;i=i+1)
+            axis_push({fm[2*i+1], fm[2*i]});
+
+        wait_done("im2col");
+
+        // Peek A region trong scratchpad (bank_a, base 1024)
+        local_errs=0;
+        for (i=0;i<M*K;i=i+1) begin
+            got = dut.u_ctrl.u_sp.bank_a[11'd1024 + i];
+            exp = gold[i];
+            if (got !== exp) begin
+                if (local_errs<6)
+                    $display("[FAIL] im2col A[%0d]: got=0x%h exp=0x%h", i, got, exp);
+                local_errs=local_errs+1;
+            end
+        end
+        if (local_errs==0)
+            $display("[ OK ] im2col-mode: A[%0d×%0d] khớp golden trong scratchpad", M, K);
+        errs = errs + local_errs;
+    endtask
+
+    // ─────────────────────────────────────────────────────────────
     // Main stimulus
     // ─────────────────────────────────────────────────────────────
     initial begin
@@ -886,6 +953,12 @@ module accelerator_top_tb;
         $display("");
         $display("==== Case 9: input reuse (SKIP_IN_LOAD) ====");
         run_skipin_check();
+
+        // ─────────── Case 10: HW im2col mode (Phase 2a) ───────────
+        $display("");
+        $display("==== Case 10: HW im2col mode ====");
+        reset_dut();
+        run_im2col_check();
 
         // ─────────── Summary ───────────
         $display("");

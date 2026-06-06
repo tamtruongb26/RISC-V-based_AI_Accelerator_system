@@ -31,6 +31,13 @@ module control_unit #(
     input  wire [1:0]                    pi_acc_slot,
     //   pi_skip_in_load = 1 : bỏ LOAD_IN, giữ input cũ trong input_buf (reuse).
     input  wire                          pi_skip_in_load,
+    // ── Phase 2a: HW im2col mode ──
+    //   pi_im2col_mode = 1 : accelerator chạy im2col (FM→A) thay GEMM.
+    //   cfg0 = {KW[31:28],KH[27:24],C[23:16],W[15:8],H[7:0]}
+    //   cfg1 = {pad[23:20],stride[19:16],Wout[15:8],Hout[7:0]}
+    input  wire                          pi_im2col_mode,
+    input  wire [31:0]                   pi_im2col_cfg0,
+    input  wire [31:0]                   pi_im2col_cfg1,
     output reg                           po_busy,
     output reg                           po_done,
 
@@ -96,10 +103,81 @@ module control_unit #(
     localparam [3:0] ST_POST_PROC    = 4'd6;
     localparam [3:0] ST_SEND_OUT     = 4'd7;
     localparam [3:0] ST_DONE         = 4'd8;
+    // Phase 2a: im2col mode states
+    localparam [3:0] ST_LOAD_FM      = 4'd9;   // AXIS → scratchpad (feature map)
+    localparam [3:0] ST_LOAD_FM_HI   = 4'd10;  // ghi nửa cao của word vừa nhận
+    localparam [3:0] ST_IM2COL_RUN   = 4'd11;  // im2col đọc FM → ghi A trong scratchpad
 
     localparam integer WORDS_PER_ROW = SA_N / 2;   // 4 cho SA_N=8
 
     reg [3:0] state;
+
+    // ── Phase 2a: im2col datapath (scratchpad 16-bit + im2col engine) ──
+    localparam integer SP_DEPTH  = 2048;
+    localparam [10:0]  SP_A_BASE = 11'd1024;       // FM ở 0..1023, A ở 1024..
+
+    // Unpack config
+    wire [7:0] ic_H    = pi_im2col_cfg0[7:0];
+    wire [7:0] ic_W    = pi_im2col_cfg0[15:8];
+    wire [7:0] ic_C    = pi_im2col_cfg0[23:16];
+    wire [3:0] ic_KH   = pi_im2col_cfg0[27:24];
+    wire [3:0] ic_KW   = pi_im2col_cfg0[31:28];
+    wire [7:0] ic_Hout = pi_im2col_cfg1[7:0];
+    wire [7:0] ic_Wout = pi_im2col_cfg1[15:8];
+    wire [3:0] ic_str  = pi_im2col_cfg1[19:16];
+    wire [3:0] ic_pad  = pi_im2col_cfg1[23:20];
+    wire [15:0] fm_total = ic_C * ic_H * ic_W;     // số phần tử feature map
+
+    reg  [15:0] fm_idx;     // index ghi FM linear
+    reg  [15:0] fm_hi;      // nửa cao word AXIS đang chờ ghi
+    reg         ic_start;
+
+    // im2col ↔ scratchpad wires
+    wire        ic_fm_rd_en;  wire [15:0] ic_fm_rd_addr;
+    wire        ic_a_wr_en;   wire [15:0] ic_a_wr_addr;  wire [15:0] ic_a_wr_data;
+    wire        ic_busy, ic_done;
+    wire [15:0] sp_rd_data;
+
+    // scratchpad write port mux: IM2COL_RUN → im2col A; LOAD_FM(_HI) → FM load
+    reg         sp_wr_en;  reg [10:0] sp_wr_addr;  reg [15:0] sp_wr_data;
+    always @(*) begin
+        if (state == ST_IM2COL_RUN) begin
+            sp_wr_en   = ic_a_wr_en;
+            sp_wr_addr = SP_A_BASE + ic_a_wr_addr[10:0];
+            sp_wr_data = ic_a_wr_data;
+        end else if (state == ST_LOAD_FM) begin
+            sp_wr_en   = pi_stream_valid;
+            sp_wr_addr = fm_idx[10:0];
+            sp_wr_data = pi_stream_data[15:0];
+        end else if (state == ST_LOAD_FM_HI) begin
+            sp_wr_en   = 1'b1;
+            sp_wr_addr = fm_idx[10:0];
+            sp_wr_data = fm_hi;
+        end else begin
+            sp_wr_en   = 1'b0;
+            sp_wr_addr = 11'd0;
+            sp_wr_data = 16'd0;
+        end
+    end
+    wire        sp_rd_en   = (state == ST_IM2COL_RUN) && ic_fm_rd_en;
+    wire [10:0] sp_rd_addr = ic_fm_rd_addr[10:0];
+
+    scratchpad #(.DATA_WIDTH(16), .DEPTH(SP_DEPTH)) u_sp (
+        .pi_clk     (pi_clk),
+        .pi_wr_en   (sp_wr_en),  .pi_wr_bank(1'b0),
+        .pi_wr_addr (sp_wr_addr), .pi_wr_data(sp_wr_data),
+        .pi_rd_en   (sp_rd_en),  .pi_rd_bank(1'b0),
+        .pi_rd_addr (sp_rd_addr), .po_rd_data(sp_rd_data)
+    );
+
+    im2col #(.DATA_WIDTH(16), .ADDR_WIDTH(16), .DIM_WIDTH(8)) u_im2col (
+        .pi_clk(pi_clk), .pi_rst_n(pi_rst_n), .pi_start(ic_start),
+        .po_busy(ic_busy), .po_done(ic_done),
+        .pi_H(ic_H), .pi_W(ic_W), .pi_C(ic_C), .pi_KH(ic_KH), .pi_KW(ic_KW),
+        .pi_stride(ic_str), .pi_pad(ic_pad), .pi_H_out(ic_Hout), .pi_W_out(ic_Wout),
+        .po_fm_rd_en(ic_fm_rd_en), .po_fm_rd_addr(ic_fm_rd_addr), .pi_fm_rd_data(sp_rd_data),
+        .po_a_wr_en(ic_a_wr_en), .po_a_wr_addr(ic_a_wr_addr), .po_a_wr_data(ic_a_wr_data)
+    );
 
     // ─────────────────────────────────────────────────────────────
     // Counters
@@ -155,7 +233,8 @@ module control_unit #(
     assign po_pp_act_mode       = pi_act_mode;
     assign po_loading           = (state == ST_LOAD_W_RECV) ||
                                   (state == ST_LOAD_BIAS)   ||
-                                  (state == ST_LOAD_IN);
+                                  (state == ST_LOAD_IN)     ||
+                                  (state == ST_LOAD_FM);
     assign po_stream_ready      = po_loading;
     assign po_out_write_req     = (state == ST_SEND_OUT);
     assign po_num_out_transfers = pi_tile_m_size *
@@ -226,11 +305,15 @@ module control_unit #(
             pp_out_cnt            <= 10'd0;
             send_row              <= 4'd0;
             send_pair             <= 4'd0;
+            fm_idx                <= 16'd0;
+            fm_hi                 <= 16'd0;
+            ic_start              <= 1'b0;
         end else begin
             // ── Default deassertions (chỉ pulse khi cần) ──
             po_dp_weight_load <= 1'b0;
             po_done           <= 1'b0;
             po_pp_valid_in    <= 1'b0;
+            ic_start          <= 1'b0;
 
             case (state)
 
@@ -239,7 +322,11 @@ module control_unit #(
                 po_busy <= 1'b0;
                 if (pi_start) begin
                     po_busy <= 1'b1;
-                    if (pi_skip_w_load) begin
+                    if (pi_im2col_mode) begin
+                        // Phase 2a: chế độ im2col — nạp feature map → scratchpad.
+                        state  <= ST_LOAD_FM;
+                        fm_idx <= 16'd0;
+                    end else if (pi_skip_w_load) begin
                         // 1a-ii: giữ weight cũ trong array → bỏ thẳng sang LOAD_BIAS.
                         state     <= ST_LOAD_BIAS;
                         bias_pair <= 4'd0;
@@ -249,6 +336,38 @@ module control_unit #(
                         w_pair  <= 4'd0;
                     end
                 end
+            end
+
+            // ─────────── IM2COL: nạp feature map vào scratchpad ──────────
+            // AXIS word = {hi16, lo16} → ghi 2 phần tử 16-bit / word.
+            ST_LOAD_FM: begin
+                if (pi_stream_valid) begin
+                    // lo ghi qua sp_wr mux ở cycle này (addr=fm_idx)
+                    fm_hi  <= pi_stream_data[31:16];
+                    fm_idx <= fm_idx + 16'd1;
+                    if (fm_idx + 16'd1 >= fm_total) begin
+                        ic_start <= 1'b1;
+                        state    <= ST_IM2COL_RUN;
+                    end else begin
+                        state <= ST_LOAD_FM_HI;
+                    end
+                end
+            end
+
+            ST_LOAD_FM_HI: begin
+                // hi ghi qua sp_wr mux ở cycle này (addr=fm_idx)
+                fm_idx <= fm_idx + 16'd1;
+                if (fm_idx + 16'd1 >= fm_total) begin
+                    ic_start <= 1'b1;
+                    state    <= ST_IM2COL_RUN;
+                end else begin
+                    state <= ST_LOAD_FM;
+                end
+            end
+
+            // ─────────── IM2COL: chạy engine (FM→A trong scratchpad) ──────
+            ST_IM2COL_RUN: begin
+                if (ic_done) state <= ST_DONE;
             end
 
             // ─────────── LOAD WEIGHTS - RECEIVE ────────────

@@ -72,6 +72,10 @@ module accelerator #(
     // ── Phase 1a-i: HW K-accumulation control ──
     wire       acc_accum;
     wire       post_skip;
+    // ── Phase 2a: HW im2col mode ──
+    wire       im2col_mode;
+    wire [31:0] im2col_cfg0;
+    wire [31:0] im2col_cfg1;
     // ── Phase 1a-ii: data reuse control ──
     wire       skip_w_load;
     wire [1:0] acc_slot;
@@ -149,6 +153,9 @@ module accelerator #(
         .po_skip_w_load  (skip_w_load),
         .po_acc_slot     (acc_slot),
         .po_skip_in_load (skip_in_load),
+        .po_im2col_mode  (im2col_mode),
+        .po_im2col_cfg0  (im2col_cfg0),
+        .po_im2col_cfg1  (im2col_cfg1),
         .po_cnt_clear    (cnt_clear),
         .po_cnt_sel      (cnt_sel),
         .pi_busy         (busy),
@@ -235,6 +242,9 @@ module accelerator #(
         .pi_skip_w_load       (skip_w_load),
         .pi_acc_slot          (acc_slot),
         .pi_skip_in_load      (skip_in_load),
+        .pi_im2col_mode       (im2col_mode),
+        .pi_im2col_cfg0       (im2col_cfg0),
+        .pi_im2col_cfg1       (im2col_cfg1),
         .po_busy              (busy),
         .po_done              (done),
         .pi_stream_data       (stream_data),
