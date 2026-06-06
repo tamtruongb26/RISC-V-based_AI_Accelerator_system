@@ -69,6 +69,9 @@ sim-ecc_secded:
 sim-tmr_register:
 	$(call run_sim,tmr_register,$(HDL)/tmr_register.v $(HDL)/fault_injector.v $(HDL)/tmr_voter.v,)
 
+sim-ecc_scratchpad:
+	$(call run_sim,ecc_scratchpad,$(HDL)/ecc_scratchpad.v $(HDL)/ecc_secded.v $(HDL)/fault_injector.v,)
+
 sim-pe:
 	$(call run_sim,pe,$(HDL)/pe.v,)
 
@@ -81,7 +84,7 @@ sim-post_proc:
 sim-accelerator_top:
 	$(call run_sim,accelerator_top,$(wildcard $(HDL)/*.v),1)
 
-sim-all: sim-pe sim-data_path sim-post_proc sim-scratchpad sim-accumulator sim-im2col sim-fault_injector sim-tmr_voter sim-ecc_secded sim-tmr_register sim-accelerator_top
+sim-all: sim-pe sim-data_path sim-post_proc sim-scratchpad sim-accumulator sim-im2col sim-fault_injector sim-tmr_voter sim-ecc_secded sim-tmr_register sim-ecc_scratchpad sim-accelerator_top
 	@echo ""
 	@echo "════════════════════════════════════════════════════════════"
 	@echo " Toàn bộ unit sim Phase 0 PASS"

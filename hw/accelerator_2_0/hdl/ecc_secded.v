@@ -4,88 +4,86 @@
 // ecc_secded.v — Hamming SECDED encoder + decoder (Phase 5c, Vấn đề 7c)
 //
 // Single Error Correct, Double Error Detect. Bảo vệ scratchpad weight bus khỏi
-// SEU: encode khi write (data → check bits), decode khi read (sửa 1-bit, phát
-// hiện 2-bit). Systematic Hamming + 1 overall parity.
+// SEU. Systematic Hamming + 1 overall parity.
 //
 //   check = { overall_parity[1], hamming_parity[PARITY_WIDTH] }
-//   Tổng codeword = DATA_WIDTH + PARITY_WIDTH + 1 bit.
+//   Codeword = DATA_WIDTH + PARITY_WIDTH + 1 bit.
 //   Ràng buộc: 2^PARITY_WIDTH >= DATA_WIDTH + PARITY_WIDTH + 1.
 //
-// Combinational (encode + decode path). Vị trí codeword 1-indexed; bit ở vị trí
-// luỹ thừa 2 là parity, còn lại là data (systematic mapping qua dcode()).
+// Combinational. Dùng generate + assign (mask hằng số tính ở elaboration) thay
+// function-trong-always → robust cho cả synth lẫn sim optimizer.
 // ===========================================================================
 module ecc_secded #(
     parameter integer DATA_WIDTH   = 8,
-    parameter integer PARITY_WIDTH = 4    // D=8→4, D=16→5, D=32→6, D=64→7
+    parameter integer PARITY_WIDTH = 4
 )(
     // ── Encode: data → check ──
     input  wire [DATA_WIDTH-1:0]     pi_enc_data,
-    output reg  [PARITY_WIDTH:0]     po_enc_check,    // [P]=overall, [P-1:0]=hamming
+    output wire [PARITY_WIDTH:0]     po_enc_check,
 
     // ── Decode: (data, check) có thể lỗi → corrected + flags ──
     input  wire [DATA_WIDTH-1:0]     pi_dec_data,
     input  wire [PARITY_WIDTH:0]     pi_dec_check,
-    output reg  [DATA_WIDTH-1:0]     po_dec_data,     // đã sửa
-    output reg                       po_corrected,    // 1 = single error đã sửa
-    output reg                       po_double_error  // 1 = double error (uncorrectable)
+    output wire [DATA_WIDTH-1:0]     po_dec_data,
+    output wire                      po_corrected,
+    output wire                      po_double_error
 );
 
     // dcode(i) = vị trí codeword (1-indexed) của data bit thứ i = số non-luỹ-thừa-2
-    // thứ i (đếm từ 3). Vị trí luỹ thừa 2 dành cho parity.
+    // thứ i. pmask(k) = DATA_WIDTH-bit mask các data bit mà parity k phủ.
     function integer dcode(input integer di);
         integer pos, cnt;
         begin
             cnt = -1; dcode = 0;
             for (pos = 1; pos <= (1 << PARITY_WIDTH); pos = pos + 1)
-                if ((pos & (pos - 1)) != 0) begin   // pos không phải luỹ thừa 2
+                if ((pos & (pos - 1)) != 0) begin
                     cnt = cnt + 1;
                     if (cnt == di) dcode = pos;
                 end
         end
     endfunction
 
-    integer i, k;
-
-    // ── Encoder ──
-    reg [PARITY_WIDTH-1:0] enc_ham;
-    always @(*) begin
-        enc_ham = {PARITY_WIDTH{1'b0}};
-        for (k = 0; k < PARITY_WIDTH; k = k + 1)
+    function [DATA_WIDTH-1:0] pmask(input integer k);
+        integer i;
+        begin
+            pmask = {DATA_WIDTH{1'b0}};
             for (i = 0; i < DATA_WIDTH; i = i + 1)
-                if ((dcode(i) >> k) & 1)
-                    enc_ham[k] = enc_ham[k] ^ pi_enc_data[i];
-        // overall parity = XOR mọi bit (data + hamming) → tổng chẵn
-        po_enc_check[PARITY_WIDTH-1:0] = enc_ham;
-        po_enc_check[PARITY_WIDTH]     = (^pi_enc_data) ^ (^enc_ham);
-    end
+                if ((dcode(i) >> k) & 1) pmask[i] = 1'b1;
+        end
+    endfunction
+
+    genvar gk, gi;
+
+    // ── Encoder ── parity[k] = XOR(data & mask_k); overall = parity toàn bộ.
+    wire [PARITY_WIDTH-1:0] enc_ham;
+    generate
+        for (gk = 0; gk < PARITY_WIDTH; gk = gk + 1) begin : gen_enc
+            assign enc_ham[gk] = ^(pi_enc_data & pmask(gk));
+        end
+    endgenerate
+    assign po_enc_check[PARITY_WIDTH-1:0] = enc_ham;
+    assign po_enc_check[PARITY_WIDTH]     = (^pi_enc_data) ^ (^enc_ham);
 
     // ── Decoder ──
-    reg [PARITY_WIDTH-1:0] rec_ham;        // hamming tính lại từ data nhận
-    reg [PARITY_WIDTH-1:0] syndrome;
-    reg                    oc;             // overall parity check (1 = số lỗi lẻ)
-    reg [DATA_WIDTH-1:0]   fixed;
-    always @(*) begin
-        rec_ham = {PARITY_WIDTH{1'b0}};
-        for (k = 0; k < PARITY_WIDTH; k = k + 1)
-            for (i = 0; i < DATA_WIDTH; i = i + 1)
-                if ((dcode(i) >> k) & 1)
-                    rec_ham[k] = rec_ham[k] ^ pi_dec_data[i];
+    wire [PARITY_WIDTH-1:0] rec_ham;
+    generate
+        for (gk = 0; gk < PARITY_WIDTH; gk = gk + 1) begin : gen_dec
+            assign rec_ham[gk] = ^(pi_dec_data & pmask(gk));
+        end
+    endgenerate
 
-        // syndrome = vị trí lỗi (1-indexed); = hamming nhận XOR hamming tính lại
-        syndrome = pi_dec_check[PARITY_WIDTH-1:0] ^ rec_ham;
-        // overall: XOR tất cả bit nhận (data + check) — 0 nếu số lỗi chẵn
-        oc = (^pi_dec_data) ^ (^pi_dec_check);
+    wire [PARITY_WIDTH-1:0] syndrome = pi_dec_check[PARITY_WIDTH-1:0] ^ rec_ham;
+    wire                    oc = (^pi_dec_data) ^ (^pi_dec_check);   // 1 = số lỗi lẻ
 
-        // Sửa: nếu single error (oc=1) và syndrome trùng vị trí 1 data bit → lật.
-        fixed = pi_dec_data;
-        if (oc)
-            for (i = 0; i < DATA_WIDTH; i = i + 1)
-                if ({{(32-PARITY_WIDTH){1'b0}}, syndrome} == dcode(i))
-                    fixed[i] = ~pi_dec_data[i];
+    // Sửa: data bit i lật nếu single error (oc) và syndrome trùng vị trí dcode(i).
+    generate
+        for (gi = 0; gi < DATA_WIDTH; gi = gi + 1) begin : gen_fix
+            assign po_dec_data[gi] = pi_dec_data[gi] ^
+                (oc && ({{(32-PARITY_WIDTH){1'b0}}, syndrome} == dcode(gi)));
+        end
+    endgenerate
 
-        po_dec_data     = fixed;
-        po_corrected    = oc;                              // 1 lỗi (sửa được)
-        po_double_error = (syndrome != 0) && (oc == 1'b0); // 2 lỗi: detect-only
-    end
+    assign po_corrected    = oc;                                // 1 lỗi (sửa được)
+    assign po_double_error = (syndrome != 0) && (oc == 1'b0);   // 2 lỗi: detect-only
 
 endmodule
