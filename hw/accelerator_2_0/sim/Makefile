@@ -84,7 +84,7 @@ sim-post_proc:
 sim-accelerator_top:
 	$(call run_sim,accelerator_top,$(wildcard $(HDL)/*.v),1)
 
-sim-all: sim-pe sim-data_path sim-post_proc sim-scratchpad sim-accumulator sim-im2col sim-fault_injector sim-tmr_voter sim-ecc_secded sim-tmr_register sim-ecc_scratchpad sim-accelerator_top
+sim-all: sim-pe sim-data_path sim-post_proc sim-scratchpad sim-accumulator sim-im2col sim-fault_injector sim-tmr_voter sim-ecc_secded sim-tmr_register sim-ecc_scratchpad sim-maxpool2x2 sim-accelerator_top
 	@echo ""
 	@echo "════════════════════════════════════════════════════════════"
 	@echo " Toàn bộ unit sim Phase 0 PASS"
@@ -92,3 +92,6 @@ sim-all: sim-pe sim-data_path sim-post_proc sim-scratchpad sim-accumulator sim-i
 
 clean:
 	rm -rf $(BUILD)
+
+sim-maxpool2x2:
+	$(call run_sim,maxpool2x2,$(HDL)/maxpool2x2.v,)
