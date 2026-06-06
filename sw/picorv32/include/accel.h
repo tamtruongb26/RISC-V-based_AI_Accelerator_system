@@ -53,6 +53,9 @@ void accel_im2col_config(uint32_t cfg0, uint32_t cfg1);
 /* Start chế độ im2col (CFG = IM2COL_MODE | START, 1 write). */
 void accel_start_im2col(void);
 
+/* Phase 2b: start chế độ HW maxpool. cfg0 = (C<<16)|(W<<8)|H. */
+void accel_start_pool(uint32_t cfg0);
+
 /* ── Status polling ────────────────────────────────────────────────────── */
 
 /* Poll STATUS.DONE bit cho đến khi set, hoặc timeout.

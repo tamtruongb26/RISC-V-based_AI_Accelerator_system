@@ -66,6 +66,15 @@ void accel_start_im2col(void)
     fence_iorw();
 }
 
+/* Phase 2b: HW maxpool — cfg0 = (C<<16)|(W<<8)|H (tái dùng IM2COL_CFG0). */
+void accel_start_pool(uint32_t cfg0)
+{
+    accel_write(RAAS_ACCEL_IM2COL_CFG0, cfg0);
+    fence_iorw();
+    accel_write(RAAS_ACCEL_CFG, RAAS_CFG_POOL_MODE | RAAS_CFG_START_BIT);
+    fence_iorw();
+}
+
 /* ── Status polling ────────────────────────────────────────────────────── */
 
 int accel_wait_done(uint32_t timeout_cycles)

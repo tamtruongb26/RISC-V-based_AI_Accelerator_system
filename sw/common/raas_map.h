@@ -70,6 +70,10 @@
  *   Cộng dồn K-tile qua ACC_ACCUM/POST_SKIP. */
 #define RAAS_CFG_OS_MODE         (1u << 22)
 
+/* Phase 2b: HW maxpool 2×2 mode (CFG bit 23). cfg0 (IM2COL_CFG0) = (C<<16)|(W<<8)|H.
+ *   Stream FM [C×H×W] → output [C×H/2×W/2]. */
+#define RAAS_CFG_POOL_MODE       (1u << 23)
+
 /* Phase 1a-ii: data reuse (CFG spare bit).
  *   [17]    SKIP_W_LOAD : 1 = giữ weight cũ trong array (bỏ LOAD_W), 0 = nạp weight
  *   [19:18] ACC_SLOT    : output-tile slot trong accumulator (blocking, 0..3) */

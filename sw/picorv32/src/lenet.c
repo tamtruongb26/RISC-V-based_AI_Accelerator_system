@@ -150,8 +150,12 @@ int lenet5_infer(int use_hw)
      * maxpool2x2(FMAP_B [6×24×24]) → FMAP_A [6×12×12]
      * ──────────────────────────────────────────────────────────────── */
     LDBG(2);
-    maxpool2x2(fmap_b, fmap_a,
-               LENET_POOL1_C, LENET_POOL1_H_IN, LENET_POOL1_W_IN);
+    if (use_hw)
+        pool_hw(fmap_b, fmap_a,
+                LENET_POOL1_C, LENET_POOL1_H_IN, LENET_POOL1_W_IN);
+    else
+        maxpool2x2(fmap_b, fmap_a,
+                   LENET_POOL1_C, LENET_POOL1_H_IN, LENET_POOL1_W_IN);
 
     lstamp(2);  /* Pool1 done */
     /* ── Layer 3: Conv2 ──────────────────────────────────────────────
@@ -186,8 +190,12 @@ int lenet5_infer(int use_hw)
      * After this, data is already "flat" for FC layers (CHW → vector).
      * ──────────────────────────────────────────────────────────────── */
     LDBG(4);
-    maxpool2x2(fmap_a, fmap_b,
-               LENET_POOL2_C, LENET_POOL2_H_IN, LENET_POOL2_W_IN);
+    if (use_hw)
+        pool_hw(fmap_a, fmap_b,
+                LENET_POOL2_C, LENET_POOL2_H_IN, LENET_POOL2_W_IN);
+    else
+        maxpool2x2(fmap_a, fmap_b,
+                   LENET_POOL2_C, LENET_POOL2_H_IN, LENET_POOL2_W_IN);
 
     lstamp(4);  /* Pool2 done */
     /* ── Layer 5: FC1 ────────────────────────────────────────────────

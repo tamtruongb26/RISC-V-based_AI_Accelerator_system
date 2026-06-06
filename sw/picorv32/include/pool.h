@@ -24,4 +24,8 @@
 void maxpool2x2(uint32_t in_addr, uint32_t out_addr,
                 uint32_t C, uint32_t H, uint32_t W);
 
+/* Phase 2b: HW maxpool 2×2 qua accelerator (POOL mode). Returns 0/negative. */
+int pool_hw(uint32_t in_addr, uint32_t out_addr,
+            uint32_t C, uint32_t H, uint32_t W);
+
 #endif /* POOL_H */
