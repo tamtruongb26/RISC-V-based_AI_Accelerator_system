@@ -54,6 +54,9 @@ sim-scratchpad:
 sim-accumulator:
 	$(call run_sim,accumulator,$(HDL)/accumulator.v,)
 
+sim-im2col:
+	$(call run_sim,im2col,$(HDL)/im2col.v,)
+
 sim-pe:
 	$(call run_sim,pe,$(HDL)/pe.v,)
 
@@ -66,7 +69,7 @@ sim-post_proc:
 sim-accelerator_top:
 	$(call run_sim,accelerator_top,$(wildcard $(HDL)/*.v),1)
 
-sim-all: sim-pe sim-data_path sim-post_proc sim-scratchpad sim-accumulator sim-accelerator_top
+sim-all: sim-pe sim-data_path sim-post_proc sim-scratchpad sim-accumulator sim-im2col sim-accelerator_top
 	@echo ""
 	@echo "════════════════════════════════════════════════════════════"
 	@echo " Toàn bộ unit sim Phase 0 PASS"
