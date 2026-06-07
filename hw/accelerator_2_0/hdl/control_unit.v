@@ -66,6 +66,12 @@ module control_unit #(
     output reg  [SA_N*DATA_WIDTH-1:0]    po_dp_a_left,
     output reg  [SA_N-1:0]               po_dp_valid_left,
 
+    // ── Phase 3a-merge: OS dual-mode tới data_path ───────────────
+    output wire                          po_dp_os_mode,
+    output wire                          po_dp_os_init,
+    output wire                          po_dp_os_valid,
+    input  wire [SA_N*ACC_WIDTH-1:0]     pi_dp_os_c,
+
     // ── Từ data_path: bottom psum capture ────────────────────────
     input  wire [SA_N*ACC_WIDTH-1:0]     pi_dp_psum_bottom,
     input  wire [SA_N-1:0]               pi_dp_valid_bottom,
@@ -244,19 +250,10 @@ module control_unit #(
     wire [15:0] pool_total  = ic_C * (ic_H >> 1) * (ic_W >> 1);
     wire [15:0] pool_nwords = (pool_total + 16'd1) >> 1;
 
-    // ── Phase 3a: OS dataflow datapath (FC) ──
-    reg  [SA_N*SA_N*DATA_WIDTH-1:0] w_os_buf;   // weight tile [k][n] (1024-bit)
+    // ── Phase 3a-merge: OS dùng CHUNG data_path array (bỏ os_array) ──
+    // a-vector → broadcast tới array; reduce cột (po_dp_os_c) làm trong data_path.
     reg  [SA_N*DATA_WIDTH-1:0]      a_os_buf;    // a vector (128-bit)
     reg  [3:0]                      os_row, os_pair;
-    wire [SA_N*ACC_WIDTH-1:0]       os_c;
-    wire                            os_c_valid;
-
-    os_array #(.SA_N(SA_N), .DATA_WIDTH(DATA_WIDTH), .ACC_WIDTH(ACC_WIDTH)) u_os (
-        .pi_clk(pi_clk), .pi_rst_n(pi_rst_n),
-        .pi_valid((state == ST_OS_FEED)), .pi_accumulate(pi_acc_accum),
-        .pi_a(a_os_buf), .pi_w(w_os_buf),
-        .po_c(os_c), .po_valid(os_c_valid)
-    );
 
     // ─────────────────────────────────────────────────────────────
     // Counters
@@ -357,8 +354,16 @@ module control_unit #(
                 end
                 po_dp_valid_left[ri] = 1'b1;
             end
+        end else if (state == ST_OS_FEED) begin
+            // OS: broadcast a-vector (data_path fan-out a[r] tới mọi cột row r).
+            po_dp_a_left = a_os_buf;
         end
     end
+
+    // Phase 3a-merge: OS control tới data_path.
+    assign po_dp_os_mode  = pi_os_mode;                          // giữ → weight-load preserve psum
+    assign po_dp_os_init  = (state == ST_OS_FEED) && !pi_acc_accum;  // K-tile đầu ghi đè
+    assign po_dp_os_valid = (state == ST_OS_FEED);
 
     // ─────────────────────────────────────────────────────────────
     // Main FSM (sequential)
@@ -417,10 +422,11 @@ module control_unit #(
                         fm_idx <= 16'd0;
                         ho_cur <= 8'd0;
                     end else if (pi_os_mode) begin
-                        // Phase 3a: OS dataflow (FC) — nạp weight tile → w_os_buf.
-                        state   <= ST_OS_LOAD_W;
-                        os_row  <= 4'd0;
-                        os_pair <= 4'd0;
+                        // Phase 3a-merge: OS dùng CHUNG array — nạp W tile vào array
+                        // qua weight-load WS (psum_reg giữ vì os_mode=1).
+                        state  <= ST_LOAD_W_RECV;
+                        w_row  <= 4'd0;
+                        w_pair <= 4'd0;
                     end else if (pi_skip_w_load) begin
                         // 1a-ii: giữ weight cũ trong array → bỏ thẳng sang LOAD_BIAS.
                         state     <= ST_LOAD_BIAS;
@@ -507,20 +513,9 @@ module control_unit #(
                 end
             end
 
-            // ─────────── Phase 3a: OS dataflow (FC) ────────────
-            ST_OS_LOAD_W: begin              // 32 word → w_os_buf[k][n]
-                if (pi_stream_valid) begin
-                    w_os_buf[(os_row*SA_N + {os_pair[2:0],1'b0})*DATA_WIDTH +: DATA_WIDTH]
-                        <= pi_stream_data[15:0];
-                    w_os_buf[(os_row*SA_N + {os_pair[2:0],1'b1})*DATA_WIDTH +: DATA_WIDTH]
-                        <= pi_stream_data[31:16];
-                    if (os_pair == WORDS_PER_ROW - 1) begin
-                        os_pair <= 4'd0;
-                        if (os_row == SA_N - 1) begin os_row <= 4'd0; state <= ST_OS_LOAD_A; end
-                        else os_row <= os_row + 4'd1;
-                    end else os_pair <= os_pair + 4'd1;
-                end
-            end
+            // ─────────── Phase 3a-merge: OS dataflow qua data_path array ────────────
+            // W tile đã nạp vào array (LOAD_W). Giờ nạp a-vector → broadcast → array
+            // cộng dồn cục bộ → po_dp_os_c (adder tree). KHÔNG còn os_array.
             ST_OS_LOAD_A: begin              // 4 word → a_os_buf[k]
                 if (pi_stream_valid) begin
                     a_os_buf[{os_pair[2:0],1'b0}*DATA_WIDTH +: DATA_WIDTH] <= pi_stream_data[15:0];
@@ -529,13 +524,14 @@ module control_unit #(
                     else os_pair <= os_pair + 4'd1;
                 end
             end
-            ST_OS_FEED: begin                // os_array accumulate 1 K-tile (pi_valid)
+            ST_OS_FEED: begin                // 1 cycle: broadcast a → array MAC cục bộ
+                // po_dp_a_left/os_valid/os_init drive ở khối combinational.
                 if (pi_post_skip) state <= ST_DONE;       // K-tile giữa: chỉ cộng dồn
                 else              state <= ST_OS_DRAIN;    // K-tile cuối: → post_proc
             end
-            ST_OS_DRAIN: begin               // c[n] → psum_buf[slot][0][n]; bias=0 (SW bias)
+            ST_OS_DRAIN: begin               // c[n] = po_dp_os_c → psum_buf[slot][0][n]
                 for (ni = 0; ni < SA_N; ni = ni + 1) begin
-                    psum_buf[pi_acc_slot][0][ni[2:0]] <= os_c[ni*ACC_WIDTH +: ACC_WIDTH];
+                    psum_buf[pi_acc_slot][0][ni[2:0]] <= pi_dp_os_c[ni*ACC_WIDTH +: ACC_WIDTH];
                     bias_buf[ni[2:0]] <= {DATA_WIDTH{1'b0}};
                 end
                 pp_in_m <= 4'd0; pp_in_n <= 4'd0;
@@ -562,8 +558,13 @@ module control_unit #(
                 po_dp_weight_load    <= 1'b1;
                 po_dp_weight_row_sel <= w_row[2:0];
                 if (w_row == SA_N - 1) begin
-                    state     <= ST_LOAD_BIAS;
-                    bias_pair <= 4'd0;
+                    if (pi_os_mode) begin
+                        state   <= ST_OS_LOAD_A;   // OS: W đã vào array → nạp a-vector
+                        os_pair <= 4'd0;
+                    end else begin
+                        state     <= ST_LOAD_BIAS;
+                        bias_pair <= 4'd0;
+                    end
                 end else begin
                     w_row <= w_row + 4'd1;
                     state <= ST_LOAD_W_RECV;

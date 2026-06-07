@@ -39,7 +39,9 @@ module pe #(
     reg signed [DATA_WIDTH-1:0] w_reg;       // weight register
     reg signed [DATA_WIDTH-1:0] a_reg;       // activation data register
     reg                         valid_reg;   // valid register
-    reg signed [ACC_WIDTH-1:0]  psum_reg;    // accumulate register
+    // use_dsp="no": phần CỘNG DỒN về fabric (giữ multiply ở DSP) → dual-mode WS/OS
+    // chỉ 1 DSP/PE (multiply), không bị tách thành 2 DSP do mux nguồn cộng dồn.
+    (* use_dsp = "no" *) reg signed [ACC_WIDTH-1:0]  psum_reg;   // accumulate register
 
     // ----- Phase 4: sparsity operand isolation -----
     // Khi a hoặc w = 0 → product = 0. Thay vì feed multiplier giá trị mới (tốn

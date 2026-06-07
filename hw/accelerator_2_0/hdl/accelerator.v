@@ -129,6 +129,9 @@ module accelerator #(
     wire [SA_N-1:0]               dp_valid_left;
     wire [SA_N*ACC_WIDTH-1:0]     dp_psum_bottom;
     wire [SA_N-1:0]               dp_valid_bottom;
+    // Phase 3a-merge: OS dual-mode (control_unit ↔ data_path)
+    wire                          dp_os_mode, dp_os_init, dp_os_valid;
+    wire [SA_N*ACC_WIDTH-1:0]     dp_os_c;
 
     // ── control_unit ↔ post_proc ──
     wire [ACC_WIDTH-1:0]          pp_acc_in;
@@ -266,6 +269,10 @@ module accelerator #(
         .po_dp_weight_data    (dp_weight_data),
         .po_dp_a_left         (dp_a_left),
         .po_dp_valid_left     (dp_valid_left),
+        .po_dp_os_mode        (dp_os_mode),
+        .po_dp_os_init        (dp_os_init),
+        .po_dp_os_valid       (dp_os_valid),
+        .pi_dp_os_c           (dp_os_c),
         .pi_dp_psum_bottom    (dp_psum_bottom),
         .pi_dp_valid_bottom   (dp_valid_bottom),
         .po_pp_acc_in         (pp_acc_in),
@@ -304,6 +311,11 @@ module accelerator #(
         .pi_valid_left      (dp_valid_left),
         .po_psum_bottom     (dp_psum_bottom),
         .po_valid_bottom    (dp_valid_bottom),
+        // Phase 3a-merge: OS dual-mode
+        .pi_os_mode         (dp_os_mode),
+        .pi_os_init         (dp_os_init),
+        .pi_os_valid        (dp_os_valid),
+        .po_os_c            (dp_os_c),
         // Phase 0 instrumentation
         .pi_cnt_clear       (cnt_clear),
         .po_cnt_pe_active   (cnt_pe_active)
