@@ -138,9 +138,7 @@ module data_path #(
     genvar oc2, sr;
     generate
         for (oc2 = 0; oc2 < SA_N; oc2 = oc2 + 1) begin : gen_os_reduce
-            // use_dsp="no": ép adder-tree về LUT fabric (KHÔNG dùng DSP48) —
-            // mục tiêu cả việc gộp là giảm DSP, không phải dời 64 mult thành 56 adder-DSP.
-            (* use_dsp = "no" *) wire [ACC_WIDTH-1:0] os_sum [0:SA_N];
+            wire [ACC_WIDTH-1:0] os_sum [0:SA_N];
             assign os_sum[0] = {ACC_WIDTH{1'b0}};
             for (sr = 0; sr < SA_N; sr = sr + 1) begin : gen_os_acc
                 assign os_sum[sr+1] = os_sum[sr] + psum_v[sr+1][oc2];
