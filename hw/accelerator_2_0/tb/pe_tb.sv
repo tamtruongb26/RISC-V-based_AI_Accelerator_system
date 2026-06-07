@@ -47,6 +47,8 @@ module pe_tb;
         .pi_rst_n       (rst_n),
         .pi_weight_load (weight_load),
         .pi_w_in        (w_in),
+        .pi_os_mode     (1'b0),
+        .pi_os_init     (1'b0),
         .pi_a_in        (a_in),
         .pi_valid_in    (valid_in),
         .po_a_out       (a_out),

@@ -27,6 +27,14 @@ module data_path #(
     output wire [SA_N*ACC_WIDTH-1:0]      po_psum_bottom,
     output wire [SA_N-1:0]                po_valid_bottom,
 
+    // ── Phase 3a-merge: Output-Stationary mode ──
+    //   pi_os_mode=1: a broadcast theo hàng (pi_a_left[r] → mọi cột), PE cộng dồn
+    //   cục bộ; po_os_c[n] = Σ_k psum_reg[k][n] (adder tree tap psum chain, 0 DSP).
+    input  wire                           pi_os_mode,
+    input  wire                           pi_os_init,
+    input  wire                           pi_os_valid,
+    output wire [SA_N*ACC_WIDTH-1:0]      po_os_c,
+
     // ── Phase 0 instrumentation: PE-active cycle counter ───────────
     //   Mỗi cycle có ≥1 hàng input (pi_a_left[r] ≠ 0 AND pi_valid_left[r])
     //   → cnt_pe_active += 1. Dùng làm baseline cho phân tích sparsity
@@ -93,9 +101,13 @@ module data_path #(
                     .pi_weight_load(pe_wload),
                     .pi_w_in       (pi_weight_data[c*DATA_WIDTH +: DATA_WIDTH]),
 
-                    // Horizontal: chain PE(r, c-1) → PE(r, c) → PE(r, c+1)
-                    .pi_a_in       (a_h[r][c]),
-                    .pi_valid_in   (valid_h[r][c]),
+                    // Phase 3a-merge: OS → a broadcast (pi_a_left[r] tới mọi cột);
+                    // WS → chain PE(r,c-1)→PE(r,c)→PE(r,c+1).
+                    .pi_os_mode    (pi_os_mode),
+                    .pi_os_init    (pi_os_init),
+                    .pi_a_in       (pi_os_mode ? pi_a_left[r*DATA_WIDTH +: DATA_WIDTH]
+                                               : a_h[r][c]),
+                    .pi_valid_in   (pi_os_mode ? pi_os_valid : valid_h[r][c]),
                     .po_a_out      (a_h[r][c+1]),
                     .po_valid_out  (valid_h[r][c+1]),
 
@@ -115,6 +127,23 @@ module data_path #(
         for (oc = 0; oc < SA_N; oc = oc + 1) begin : gen_bottom
             assign po_psum_bottom[oc*ACC_WIDTH +: ACC_WIDTH] = psum_v[SA_N][oc];
             assign po_valid_bottom[oc] = valid_h[SA_N-1][oc+1];
+        end
+    endgenerate
+
+    // ---------------------------------------------------------------------
+    // Phase 3a-merge: OS column reduce — po_os_c[n] = Σ_k psum_reg[k][n].
+    //   psum_v[r+1][n] = PE(r,n).po_psum_out = PE(r,n).psum_reg (tap sẵn có).
+    //   Adder tree tổ hợp (0 DSP) — thay 64 multiplier của os_array cũ.
+    // ---------------------------------------------------------------------
+    genvar oc2, sr;
+    generate
+        for (oc2 = 0; oc2 < SA_N; oc2 = oc2 + 1) begin : gen_os_reduce
+            wire [ACC_WIDTH-1:0] os_sum [0:SA_N];
+            assign os_sum[0] = {ACC_WIDTH{1'b0}};
+            for (sr = 0; sr < SA_N; sr = sr + 1) begin : gen_os_acc
+                assign os_sum[sr+1] = os_sum[sr] + psum_v[sr+1][oc2];
+            end
+            assign po_os_c[oc2*ACC_WIDTH +: ACC_WIDTH] = os_sum[SA_N];
         end
     endgenerate
 
