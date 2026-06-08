@@ -66,6 +66,20 @@ void accel_start_im2col(void)
     fence_iorw();
 }
 
+/* Phase 2c autonomy: ghi descriptor + AUTO_GO. accelerator tự duyệt tile,
+ * tự lập trình DMA. act_mode = RAAS_CFG_ACT_* (đã shift). KHÔNG set START
+ * (auto_seq tự drive start cho control_unit). */
+void accel_gemm_auto_start(uint32_t tiles, uint32_t in_base,
+                           uint32_t out_base, uint32_t act_mode)
+{
+    accel_write(RAAS_ACCEL_IM2COL_CFG0,   tiles);      /* {n,m,k} */
+    accel_write(RAAS_ACCEL_IM2COL_CFG1,   in_base);
+    accel_write(RAAS_ACCEL_DESC_OUT_BASE, out_base);
+    fence_iorw();
+    accel_write(RAAS_ACCEL_CFG, act_mode | RAAS_CFG_AUTO_GO);
+    fence_iorw();
+}
+
 /* Phase 2b: HW maxpool — cfg0 = (C<<16)|(W<<8)|H (tái dùng IM2COL_CFG0). */
 void accel_start_pool(uint32_t cfg0)
 {

@@ -261,6 +261,67 @@ int gemm_os(uint32_t a_addr, uint32_t w_addr, uint32_t c_addr,
     return 0;
 }
 
+/* ── Phase 2c: GEMM tự hành (autonomy) — accelerator tự duyệt tile + DMA ──
+ * Pico stage TẤT CẢ tile thành block liền mạch [W64|bias8|A64] (272B) theo
+ * thứ tự (n,m,k), ghi descriptor + AUTO_GO, rồi CHỜ 1 lần. accelerator tự
+ * lặp m/k/n + tự lập trình DMA → bỏ ~mt·kt·nt lần Pico orchestrate.
+ * Bias chỉ dùng ở K-tile cuối (HW post_proc); stage mọi tile cho đồng đều.
+ * Output tile 8×8 row-major (128B/tile) → de-tile về C[M×N]. */
+#define AUTO_ACCEL_TIMEOUT  200000000u   /* cả GEMM trong 1 invocation */
+int gemm_auto(uint32_t a_addr, uint32_t w_addr, uint32_t b_addr, uint32_t c_addr,
+              uint32_t M, uint32_t K, uint32_t N, uint32_t act_mode)
+{
+    uint32_t mt = (M + SA - 1u) / SA;
+    uint32_t kt = (K + SA - 1u) / SA;
+    uint32_t nt = (N + SA - 1u) / SA;
+    uint32_t in_stage  = LENET_ADDR(LENET_DDR_AUTO_IN_OFF);
+    uint32_t out_stage = LENET_ADDR(LENET_DDR_AUTO_OUT_OFF);
+    int rc;
+
+    /* ── Stage block input theo thứ tự (n,m,k) khớp auto_seq ── */
+    uint32_t blk = in_stage;
+    for (uint32_t n0 = 0; n0 < N; n0 += SA) {
+        uint32_t ns = umin(SA, N - n0);
+        for (uint32_t m0 = 0; m0 < M; m0 += SA) {
+            uint32_t ms = umin(SA, M - m0);
+            for (uint32_t k0 = 0; k0 < K; k0 += SA) {
+                uint32_t ks = umin(SA, K - k0);
+                /* W tile [ks×ns] → 8×8 (zero-pad) = 64 elem */
+                copy_sub_to_tile(w_addr + (k0 * N + n0) * 2u, N, blk, ks, ns);
+                blk += SA * SA * 2u;
+                /* bias [ns] → 8 elem (zero-pad; HW chỉ cộng ở K cuối) */
+                for (uint32_t i = 0; i < SA; i++)
+                    ddr_write16(blk + i * 2u,
+                                (i < ns && b_addr) ? ddr_read16(b_addr + (n0 + i) * 2u) : 0);
+                blk += SA * 2u;
+                /* A tile [ms×ks] → 8×8 = 64 elem */
+                copy_sub_to_tile(a_addr + (m0 * K + k0) * 2u, K, blk, ms, ks);
+                blk += SA * SA * 2u;
+            }
+        }
+    }
+
+    /* ── Descriptor + AUTO_GO → chờ DONE (cả GEMM) ── */
+    accel_gemm_auto_start(RAAS_DESC_TILES(nt, mt, kt), in_stage, out_stage, act_mode);
+    rc = accel_wait_done(AUTO_ACCEL_TIMEOUT);
+    if (rc < 0) return rc;
+
+    /* ── De-tile output (8×8 row-major/tile, thứ tự n,m) về C[M×N] ── */
+    uint32_t oblk = out_stage;
+    for (uint32_t n0 = 0; n0 < N; n0 += SA) {
+        uint32_t ns = umin(SA, N - n0);
+        for (uint32_t m0 = 0; m0 < M; m0 += SA) {
+            uint32_t ms = umin(SA, M - m0);
+            for (uint32_t mm = 0; mm < ms; mm++)
+                for (uint32_t nn = 0; nn < ns; nn++)
+                    ddr_write16(c_addr + ((m0 + mm) * N + n0 + nn) * 2u,
+                                ddr_read16(oblk + (mm * SA + nn) * 2u));
+            oblk += SA * SA * 2u;
+        }
+    }
+    return 0;
+}
+
 /* ── Pure Software GEMM (for benchmarking) ───────────────────────────── */
 int gemm_sw(uint32_t a_addr, uint32_t w_addr, uint32_t b_addr,
             uint32_t c_addr,

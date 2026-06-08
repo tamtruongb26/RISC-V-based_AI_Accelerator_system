@@ -37,8 +37,17 @@
 #define RAAS_ACCEL_CNT_SEL       0x08u   /* R/W  [3:0]=counter index        */
 #define RAAS_ACCEL_STATUS        0x0Cu   /* R    [0]=BUSY, [1]=DONE         */
 #define RAAS_ACCEL_CNT_VAL       0x10u   /* R    32-bit counter[CNT_SEL]    */
-#define RAAS_ACCEL_IM2COL_CFG0   0x14u   /* R/W  {KW,KH,C,W,H} packed       */
-#define RAAS_ACCEL_IM2COL_CFG1   0x18u   /* R/W  {pad,stride,Wout,Hout}     */
+#define RAAS_ACCEL_IM2COL_CFG0   0x14u   /* R/W  {KW,KH,C,W,H} / auto:{n,m,k}*/
+#define RAAS_ACCEL_IM2COL_CFG1   0x18u   /* R/W  {pad,stride,Wout,Hout}/auto:in_base */
+#define RAAS_ACCEL_DESC_OUT_BASE 0x1Cu   /* R/W  Phase 2c: out_base (auto)   */
+
+/* Phase 2c autonomy: CFG[24]=AUTO_GO (1-shot) — accelerator tự chạy GEMM.
+ *   IM2COL_CFG0 = (n_tiles<<20)|(m_tiles<<10)|k_tiles ; CFG1 = in_base (stage)
+ *   DESC_OUT_BASE = out_base ; CFG[13:12] = act. Pico poll STATUS.DONE. */
+#define RAAS_CFG_AUTO_GO         (1u << 24)
+#define RAAS_DESC_TILES(n, m, k) ((((uint32_t)(n) & 0x3FFu) << 20) | \
+                                  (((uint32_t)(m) & 0x3FFu) << 10) | \
+                                   ((uint32_t)(k) & 0x3FFu))
 
 /* CONFIG_PACKED bit fields:
  *   [3:0]   = M_size  (1..8)

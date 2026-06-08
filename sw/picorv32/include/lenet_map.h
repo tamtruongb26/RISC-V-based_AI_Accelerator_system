@@ -96,6 +96,11 @@
 #define LENET_DDR_TILE_B_OFF      0x00038200u  /* 8 bias = 16B */
 #define LENET_DDR_TILE_IN_OFF     0x00038300u  /* 8×8 tile input = 128B */
 #define LENET_DDR_OS_STAGE_OFF    0x00038400u  /* OS mode staging buffer (approx 4608B) */
+/* Phase 2c autonomy: staging tile-major liền mạch cho gemm_auto.
+ *   IN block/tile = [W64|bias8|A64] = 136 elem = 272B; Conv1 max 288 tile ≈ 78KB.
+ *   OUT: nt*mt tile × 128B. Đặt 0x50000 (rảnh, dưới HW_DEBUG 0x100000). */
+#define LENET_DDR_AUTO_IN_OFF     0x00050000u  /* ≤ ~80KB input block stage */
+#define LENET_DDR_AUTO_OUT_OFF    0x00070000u  /* ≤ ~16KB output tile stage */
 
 /* --- Communication --- */
 #define LENET_DDR_MAILBOX_OFF     0x00040000u  /* 4B status word */

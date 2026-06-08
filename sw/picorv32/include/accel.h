@@ -53,6 +53,10 @@ void accel_im2col_config(uint32_t cfg0, uint32_t cfg1);
 /* Start chế độ im2col (CFG = IM2COL_MODE | START, 1 write). */
 void accel_start_im2col(void);
 
+/* Phase 2c: ghi descriptor (tiles {n,m,k} packed, in_base, out_base) + AUTO_GO. */
+void accel_gemm_auto_start(uint32_t tiles, uint32_t in_base,
+                           uint32_t out_base, uint32_t act_mode);
+
 /* Phase 2b: start chế độ HW maxpool. cfg0 = (C<<16)|(W<<8)|H. */
 void accel_start_pool(uint32_t cfg0);
 
