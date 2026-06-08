@@ -54,7 +54,29 @@ module accelerator #(
     output wire [C_M00_AXIS_TDATA_WIDTH-1:0]     m00_axis_tdata,
     output wire [(C_M00_AXIS_TDATA_WIDTH/8)-1:0] m00_axis_tstrb,
     output wire                                  m00_axis_tlast,
-    input  wire                                  m00_axis_tready
+    input  wire                                  m00_axis_tready,
+
+    // ═══════════════════════════════════════════════════════════
+    // Phase 2c: AXI4-Lite MASTER tới DMA S_AXI_LITE (autonomy)
+    //   accelerator tự lập trình DMA. BD: nối qua interconnect tới DMA control.
+    // ═══════════════════════════════════════════════════════════
+    output wire [31:0]                           m_axi_dma_awaddr,
+    output wire                                  m_axi_dma_awvalid,
+    input  wire                                  m_axi_dma_awready,
+    output wire [31:0]                           m_axi_dma_wdata,
+    output wire [3:0]                            m_axi_dma_wstrb,
+    output wire                                  m_axi_dma_wvalid,
+    input  wire                                  m_axi_dma_wready,
+    input  wire [1:0]                            m_axi_dma_bresp,
+    input  wire                                  m_axi_dma_bvalid,
+    output wire                                  m_axi_dma_bready,
+    output wire [31:0]                           m_axi_dma_araddr,
+    output wire                                  m_axi_dma_arvalid,
+    input  wire                                  m_axi_dma_arready,
+    input  wire [31:0]                           m_axi_dma_rdata,
+    input  wire [1:0]                            m_axi_dma_rresp,
+    input  wire                                  m_axi_dma_rvalid,
+    output wire                                  m_axi_dma_rready
 );
 
     // ═══════════════════════════════════════════════════════════
@@ -143,6 +165,44 @@ module accelerator #(
     wire                          pp_valid_out;
 
     // ═══════════════════════════════════════════════════════════
+    // Phase 2c autonomy: slave descriptor + auto_seq + dma_ctrl + mux
+    // ═══════════════════════════════════════════════════════════
+    wire        auto_go;            // slv_reg0[24] pulse
+    wire [31:0] out_base;           // slv_reg7
+    // auto_seq → (mux) → control_unit config
+    wire        auto_busy, auto_done, auto_accel_start;
+    wire [9:0]  auto_tile_m, auto_tile_k, auto_tile_n;
+    wire [1:0]  auto_act, auto_acc_slot;
+    wire        auto_acc_accum, auto_post_skip, auto_skip_w, auto_skip_in;
+    // auto_seq ↔ dma_ctrl
+    wire        as_dma_start, as_do_s2mm, dma_done_w;
+    wire [31:0] as_mm2s_addr, as_s2mm_addr;
+    wire [25:0] as_mm2s_len, as_s2mm_len;
+
+    // auto_mode_l: cao từ auto_go tới khi auto_done (giữ qua cycle done)
+    reg auto_mode_l;
+    always @(posedge s00_axi_aclk or negedge s00_axi_aresetn) begin
+        if (!s00_axi_aresetn)   auto_mode_l <= 1'b0;
+        else if (auto_go)       auto_mode_l <= 1'b1;
+        else if (auto_done)     auto_mode_l <= 1'b0;
+    end
+
+    // Mux config control_unit: auto_seq khi auto_mode_l, else slave (Pico)
+    wire [9:0] ctrl_tile_m = auto_mode_l ? auto_tile_m : tile_m_size;
+    wire [9:0] ctrl_tile_k = auto_mode_l ? auto_tile_k : tile_k_size;
+    wire [9:0] ctrl_tile_n = auto_mode_l ? auto_tile_n : tile_n_size;
+    wire [1:0] ctrl_act    = auto_mode_l ? auto_act    : act_mode;
+    wire       ctrl_start  = auto_mode_l ? auto_accel_start : start;
+    wire       ctrl_accum  = auto_mode_l ? auto_acc_accum   : acc_accum;
+    wire       ctrl_pskip  = auto_mode_l ? auto_post_skip   : post_skip;
+    wire       ctrl_skipw  = auto_mode_l ? auto_skip_w      : skip_w_load;
+    wire [1:0] ctrl_slot   = auto_mode_l ? auto_acc_slot    : acc_slot;
+    wire       ctrl_skipin = auto_mode_l ? auto_skip_in     : skip_in_load;
+    // STATUS tới Pico: auto thì phản ánh auto_seq (cả GEMM), else control_unit
+    wire slave_busy = auto_mode_l ? auto_busy : busy;
+    wire slave_done = auto_mode_l ? auto_done : done;
+
+    // ═══════════════════════════════════════════════════════════
     // AXI-Lite slave shim
     // ═══════════════════════════════════════════════════════════
     accelerator_slave_lite_v2_0_S00_AXI #(
@@ -164,10 +224,12 @@ module accelerator #(
         .po_im2col_cfg1  (im2col_cfg1),
         .po_os_mode      (os_mode),
         .po_pool_mode    (pool_mode),
+        .po_auto_go      (auto_go),
+        .po_out_base     (out_base),
         .po_cnt_clear    (cnt_clear),
         .po_cnt_sel      (cnt_sel),
-        .pi_busy         (busy),
-        .pi_done         (done),
+        .pi_busy         (slave_busy),
+        .pi_done         (slave_done),
         .pi_cnt_val      (cnt_val_mux),
         .S_AXI_ACLK      (s00_axi_aclk),
         .S_AXI_ARESETN   (s00_axi_aresetn),
@@ -240,16 +302,16 @@ module accelerator #(
     ) u_ctrl (
         .pi_clk               (s00_axi_aclk),
         .pi_rst_n             (s00_axi_aresetn),
-        .pi_tile_m_size       (tile_m_size),
-        .pi_tile_k_size       (tile_k_size),
-        .pi_tile_n_size       (tile_n_size),
-        .pi_act_mode          (act_mode),
-        .pi_start             (start),
-        .pi_acc_accum         (acc_accum),
-        .pi_post_skip         (post_skip),
-        .pi_skip_w_load       (skip_w_load),
-        .pi_acc_slot          (acc_slot),
-        .pi_skip_in_load      (skip_in_load),
+        .pi_tile_m_size       (ctrl_tile_m),
+        .pi_tile_k_size       (ctrl_tile_k),
+        .pi_tile_n_size       (ctrl_tile_n),
+        .pi_act_mode          (ctrl_act),
+        .pi_start             (ctrl_start),
+        .pi_acc_accum         (ctrl_accum),
+        .pi_post_skip         (ctrl_pskip),
+        .pi_skip_w_load       (ctrl_skipw),
+        .pi_acc_slot          (ctrl_slot),
+        .pi_skip_in_load      (ctrl_skipin),
         .pi_im2col_mode       (im2col_mode),
         .pi_im2col_cfg0       (im2col_cfg0),
         .pi_im2col_cfg1       (im2col_cfg1),
@@ -293,6 +355,78 @@ module accelerator #(
         .po_cnt_send          (cnt_send),
         .po_cnt_done          (cnt_done),
         .po_cnt_total         (cnt_total)
+    );
+
+    // ═══════════════════════════════════════════════════════════
+    // Phase 2c: outer-loop sequencer + DMA AXI-Lite master (autonomy)
+    //   Descriptor (reuse im2col regs): cfg0={n_tiles,m_tiles,k_tiles}, cfg1=in_base.
+    //   Block liền mạch (PS stage): in 272B (W32+bias4+A32 word), out 128B.
+    // ═══════════════════════════════════════════════════════════
+    auto_seq #(.TILE_CW(10)) u_auto_seq (
+        .pi_clk           (s00_axi_aclk),
+        .pi_rst_n         (s00_axi_aresetn),
+        .pi_go            (auto_go),
+        .pi_m_tiles       (im2col_cfg0[19:10]),
+        .pi_k_tiles       (im2col_cfg0[9:0]),
+        .pi_n_tiles       (im2col_cfg0[29:20]),
+        .pi_in_base       (im2col_cfg1),
+        .pi_in_blk_bytes  (26'd272),
+        .pi_out_base      (out_base),
+        .pi_out_blk_bytes (26'd128),
+        .pi_tile_m        (10'd8),
+        .pi_tile_k        (10'd8),
+        .pi_tile_n        (10'd8),
+        .pi_act_mode      (act_mode),
+        .po_busy          (auto_busy),
+        .po_done          (auto_done),
+        .po_dma_start     (as_dma_start),
+        .po_dma_do_s2mm   (as_do_s2mm),
+        .po_dma_mm2s_addr (as_mm2s_addr),
+        .po_dma_mm2s_len  (as_mm2s_len),
+        .po_dma_s2mm_addr (as_s2mm_addr),
+        .po_dma_s2mm_len  (as_s2mm_len),
+        .pi_dma_done      (dma_done_w),
+        .po_accel_start   (auto_accel_start),
+        .po_tile_m        (auto_tile_m),
+        .po_tile_k        (auto_tile_k),
+        .po_tile_n        (auto_tile_n),
+        .po_act_mode      (auto_act),
+        .po_acc_accum     (auto_acc_accum),
+        .po_post_skip     (auto_post_skip),
+        .po_skip_w_load   (auto_skip_w),
+        .po_acc_slot      (auto_acc_slot),
+        .po_skip_in_load  (auto_skip_in),
+        .pi_accel_done    (done)
+    );
+
+    dma_ctrl u_dma_ctrl (
+        .pi_clk        (s00_axi_aclk),
+        .pi_rst_n      (s00_axi_aresetn),
+        .pi_start      (as_dma_start),
+        .pi_do_s2mm    (as_do_s2mm),
+        .pi_mm2s_addr  (as_mm2s_addr),
+        .pi_mm2s_len   (as_mm2s_len),
+        .pi_s2mm_addr  (as_s2mm_addr),
+        .pi_s2mm_len   (as_s2mm_len),
+        .po_busy       (),
+        .po_done       (dma_done_w),
+        .po_awaddr     (m_axi_dma_awaddr),
+        .po_awvalid    (m_axi_dma_awvalid),
+        .pi_awready    (m_axi_dma_awready),
+        .po_wdata      (m_axi_dma_wdata),
+        .po_wstrb      (m_axi_dma_wstrb),
+        .po_wvalid     (m_axi_dma_wvalid),
+        .pi_wready     (m_axi_dma_wready),
+        .pi_bresp      (m_axi_dma_bresp),
+        .pi_bvalid     (m_axi_dma_bvalid),
+        .po_bready     (m_axi_dma_bready),
+        .po_araddr     (m_axi_dma_araddr),
+        .po_arvalid    (m_axi_dma_arvalid),
+        .pi_arready    (m_axi_dma_arready),
+        .pi_rdata      (m_axi_dma_rdata),
+        .pi_rresp      (m_axi_dma_rresp),
+        .pi_rvalid     (m_axi_dma_rvalid),
+        .po_rready     (m_axi_dma_rready)
     );
 
     // ═══════════════════════════════════════════════════════════

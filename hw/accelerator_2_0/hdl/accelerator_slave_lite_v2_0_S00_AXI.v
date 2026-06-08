@@ -3,10 +3,10 @@
 // Module:  accelerator_slave_lite_v2_0_S00_AXI
 // Project: accelerator_2_0
 //
-// AXI4-Lite slave register file (5 regs, post-Phase 0).
+// AXI4-Lite slave register file (5 regs, post-Optimization).
 // Spec đầy đủ: hw/accelerator_2_0/hdl/axi_shim_spec.md §2.
 //
-// Address map (Phase 0 - packed config + indirect counter readback):
+// Address map (Cấu hình đóng gói + đọc gián tiếp bộ đếm hiệu năng):
 //   0x00 CONFIG_PACKED  R/W  [3:0]=M, [7:4]=K, [11:8]=N, [13:12]=ACT, [14]=START
 //                            START là one-shot pulse (auto-clear sau 1 cycle).
 //   0x04 CNT_CLEAR      R/W  [0]=PULSE (auto-clear) - reset toàn bộ counter
@@ -32,19 +32,24 @@ module accelerator_slave_lite_v2_0_S00_AXI #(
     output wire [1:0]   po_act_mode,
     output wire         po_cnt_clear,
     output wire [3:0]   po_cnt_sel,
-    // ── Phase 1a-i: HW K-accumulation control (CFG spare bits) ──
+    // ── Điều khiển cộng dồn phần tử K phần cứng (CFG spare bits) ──
     output wire         po_acc_accum,   // slv_reg0[15] 1=cộng dồn, 0=ghi đè
     output wire         po_post_skip,   // slv_reg0[16] 1=bỏ post_proc+send
-    // ── Phase 1a-ii: data reuse control ──
+    // ── Tối ưu tái sử dụng dữ liệu (data reuse control) ──
     output wire         po_skip_w_load, // slv_reg0[17] 1=giữ weight cũ (bỏ LOAD_W)
     output wire [1:0]   po_acc_slot,    // slv_reg0[19:18] output-tile slot (blocking)
     output wire         po_skip_in_load,// slv_reg0[20] 1=giữ input cũ (bỏ LOAD_IN)
-    // ── Phase 2a: HW im2col mode + config (CFG bit 21 + 2 packed registers) ──
+    // ── Chế độ im2col phần cứng và cấu hình (CFG bit 21 + 2 packed registers) ──
     output wire         po_im2col_mode, // slv_reg0[21] 1=chế độ im2col (thay GEMM)
     output wire [31:0]  po_im2col_cfg0, // 0x14: {H[7:0],W[7:0],C[7:0],KH[3:0],KW[3:0]}
     output wire [31:0]  po_im2col_cfg1, // 0x18: {Hout[7:0],Wout[7:0],stride[3:0],pad[3:0]}
     output wire         po_os_mode,     // slv_reg0[22] 1=Output-Stationary (FC)
     output wire         po_pool_mode,   // slv_reg0[23] 1=HW maxpool 2×2
+    // ── Phase 2c autonomy: descriptor (reg5/6 reuse + reg7 mới) ──
+    //   reg5 (im2col_cfg0) = {n_tiles[29:20],m_tiles[19:10],k_tiles[9:0]}
+    //   reg6 (im2col_cfg1) = in_base ; reg7 (0x1C) = out_base
+    output wire         po_auto_go,     // slv_reg0[24] 1-shot: bắt đầu GEMM tự hành
+    output wire [31:0]  po_out_base,    // slv_reg7 (0x1C)
     // ── User-side inputs (từ control_unit/data_path) ──
     input  wire         pi_busy,
     input  wire         pi_done,
@@ -91,7 +96,7 @@ module accelerator_slave_lite_v2_0_S00_AXI #(
     localparam integer OPT_MEM_ADDR_BITS = 2;   // 3-bit register select (covers 5 regs)
 
     // ─────────────────────────────────────────────────────────
-    // Registers (Phase 0 layout)
+    // Sắp xếp các thanh ghi
     //   slv_reg0 = CONFIG_PACKED (R/W) - M/K/N/ACT/START
     //   slv_reg1 = CNT_CLEAR     (R/W) - bit[0] one-shot pulse
     //   slv_reg2 = CNT_SEL       (R/W) - bit[3:0] counter index
@@ -101,8 +106,9 @@ module accelerator_slave_lite_v2_0_S00_AXI #(
     reg [C_S_AXI_DATA_WIDTH-1:0] slv_reg0;  // CONFIG_PACKED
     reg [C_S_AXI_DATA_WIDTH-1:0] slv_reg1;  // CNT_CLEAR
     reg [C_S_AXI_DATA_WIDTH-1:0] slv_reg2;  // CNT_SEL
-    reg [C_S_AXI_DATA_WIDTH-1:0] slv_reg5;  // IM2COL_CFG0 (0x14)
-    reg [C_S_AXI_DATA_WIDTH-1:0] slv_reg6;  // IM2COL_CFG1 (0x18)
+    reg [C_S_AXI_DATA_WIDTH-1:0] slv_reg5;  // IM2COL_CFG0 (0x14) / auto: tile counts
+    reg [C_S_AXI_DATA_WIDTH-1:0] slv_reg6;  // IM2COL_CFG1 (0x18) / auto: in_base
+    reg [C_S_AXI_DATA_WIDTH-1:0] slv_reg7;  // 0x1C: out_base (Phase 2c)
     // DONE sticky: latch on pi_done pulse, clear on next START write
     reg                          done_sticky;
     wire [C_S_AXI_DATA_WIDTH-1:0] slv_reg3 = {30'd0, done_sticky, pi_busy};  // STATUS (HW)
@@ -187,11 +193,14 @@ module accelerator_slave_lite_v2_0_S00_AXI #(
             slv_reg2 <= {C_S_AXI_DATA_WIDTH{1'b0}};
             slv_reg5 <= {C_S_AXI_DATA_WIDTH{1'b0}};
             slv_reg6 <= {C_S_AXI_DATA_WIDTH{1'b0}};
+            slv_reg7 <= {C_S_AXI_DATA_WIDTH{1'b0}};
         end else begin
             // Auto-clear START bit (one-shot pulse) - slv_reg0[14]
             if (slv_reg0[14]) slv_reg0[14] <= 1'b0;
             // Auto-clear CNT_CLEAR pulse - slv_reg1[0]
             if (slv_reg1[0]) slv_reg1[0] <= 1'b0;
+            // Auto-clear AUTO_GO pulse (Phase 2c) - slv_reg0[24]
+            if (slv_reg0[24]) slv_reg0[24] <= 1'b0;
 
             if (S_AXI_WVALID) begin
                 case (S_AXI_AWVALID ?
@@ -213,6 +222,9 @@ module accelerator_slave_lite_v2_0_S00_AXI #(
                     3'h6: for (byte_index = 0; byte_index < 4; byte_index = byte_index + 1)
                               if (S_AXI_WSTRB[byte_index])
                                   slv_reg6[byte_index*8 +: 8] <= S_AXI_WDATA[byte_index*8 +: 8];
+                    3'h7: for (byte_index = 0; byte_index < 4; byte_index = byte_index + 1)
+                              if (S_AXI_WSTRB[byte_index])
+                                  slv_reg7[byte_index*8 +: 8] <= S_AXI_WDATA[byte_index*8 +: 8];
                     default: ;
                 endcase
             end
@@ -278,6 +290,7 @@ module accelerator_slave_lite_v2_0_S00_AXI #(
         (axi_araddr[ADDR_LSB+OPT_MEM_ADDR_BITS:ADDR_LSB] == 3'h4) ? slv_reg4 :
         (axi_araddr[ADDR_LSB+OPT_MEM_ADDR_BITS:ADDR_LSB] == 3'h5) ? slv_reg5 :
         (axi_araddr[ADDR_LSB+OPT_MEM_ADDR_BITS:ADDR_LSB] == 3'h6) ? slv_reg6 :
+        (axi_araddr[ADDR_LSB+OPT_MEM_ADDR_BITS:ADDR_LSB] == 3'h7) ? slv_reg7 :
         {C_S_AXI_DATA_WIDTH{1'b0}};
 
     // ─────────────────────────────────────────────────────────
@@ -309,6 +322,9 @@ module accelerator_slave_lite_v2_0_S00_AXI #(
     assign po_im2col_cfg1 = slv_reg6;
     assign po_os_mode     = slv_reg0[22];
     assign po_pool_mode   = slv_reg0[23];
+    // Phase 2c autonomy
+    assign po_auto_go     = slv_reg0[24];
+    assign po_out_base    = slv_reg7;
     assign po_cnt_clear   = slv_reg1[0];
     assign po_cnt_sel     = slv_reg2[3:0];
 
