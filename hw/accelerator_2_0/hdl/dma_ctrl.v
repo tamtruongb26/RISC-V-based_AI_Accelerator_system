@@ -13,7 +13,11 @@
 // Lưu ý: KHÔNG reset DMA ở đây (giả định Pico/đầu vào reset 1 lần). Địa chỉ
 // 32-bit (SA/DA hi=0, dùng kênh thấp). Length ≤ 26-bit (DMA c_sg_length_width).
 // ===========================================================================
-module dma_ctrl (
+module dma_ctrl #(
+    // Base địa chỉ DMA S_AXI_LITE trong address-map của master này (BD Address
+    // Editor gán segment DMA tại base này). Mặc định = RAAS_PICO_DMA_BASE.
+    parameter [31:0] DMA_BASE = 32'h4001_0000
+)(
     input  wire        pi_clk,
     input  wire        pi_rst_n,
 
@@ -90,11 +94,11 @@ module dma_ctrl (
             TXN_IDLE: begin
                 if (txn_go) begin
                     if (txn_is_rd) begin
-                        po_araddr  <= {24'd0, txn_addr};
+                        po_araddr  <= DMA_BASE | {24'd0, txn_addr};
                         po_arvalid <= 1'b1;
                         txn_state  <= TXN_AR;
                     end else begin
-                        po_awaddr  <= {24'd0, txn_addr};
+                        po_awaddr  <= DMA_BASE | {24'd0, txn_addr};
                         po_awvalid <= 1'b1;
                         po_wdata   <= txn_wdata;
                         po_wstrb   <= 4'hF;
