@@ -59,7 +59,11 @@ module accelerator #(
     // ═══════════════════════════════════════════════════════════
     // Phase 2c: AXI4-Lite MASTER tới DMA S_AXI_LITE (autonomy)
     //   accelerator tự lập trình DMA. BD: nối qua interconnect tới DMA control.
+    //   Clock RIÊNG m_axi_dma_aclk (cùng tiền tố interface) → Vivado TỰ gán clock
+    //   khi package → hết DRC "not associated to clock". BD nối = net 100MHz.
     // ═══════════════════════════════════════════════════════════
+    input  wire                                  m_axi_dma_aclk,
+    input  wire                                  m_axi_dma_aresetn,
     output wire [31:0]                           m_axi_dma_awaddr,
     output wire [2:0]                            m_axi_dma_awprot,
     output wire                                  m_axi_dma_awvalid,
