@@ -120,6 +120,7 @@ module accelerator #(
     wire [31:0] cnt_idle, cnt_load_w, cnt_load_b, cnt_load_in;
     wire [31:0] cnt_compute, cnt_post_proc, cnt_send, cnt_done;
     wire [31:0] cnt_total, cnt_pe_active, cnt_sparsity_skip;
+    wire [31:0] ecc_corrected_cnt, ecc_uncorr_cnt;   // Phase 5
     reg  [31:0] cnt_val_mux;
 
     // 11-to-1 counter mux - chọn counter dựa vào cnt_sel.
@@ -137,6 +138,8 @@ module accelerator #(
             4'd8:  cnt_val_mux = cnt_total;
             4'd9:  cnt_val_mux = cnt_pe_active;
             4'd10: cnt_val_mux = cnt_sparsity_skip;
+            4'd11: cnt_val_mux = ecc_corrected_cnt;   // Phase 5
+            4'd12: cnt_val_mux = ecc_uncorr_cnt;
             default: cnt_val_mux = 32'd0;
         endcase
     end
@@ -177,7 +180,14 @@ module accelerator #(
     // Phase 2c autonomy: slave descriptor + auto_seq + dma_ctrl + mux
     // ═══════════════════════════════════════════════════════════
     wire        auto_go;            // slv_reg0[24] pulse
-    wire [31:0] out_base;           // slv_reg7
+    wire [31:0] out_base;           // slv_reg7 (cũng làm FI trigger_cycle)
+    // Phase 5: FI control GÓI trong reg7 (out_base) — persistent, không bị CFG
+    // per-op ghi đè. Layout: [31:27]=bit_pos, [26]=ecc_bypass, [25]=fi_enable,
+    // [24:0]=trigger_cycle. (reg7 dùng kép: autonomy out_base HOẶC FI demo.)
+    wire        fi_enable  = out_base[25];
+    wire        ecc_bypass = out_base[26];
+    wire [4:0]  fi_bit_pos = out_base[31:27];
+    wire [31:0] fi_trigger = {7'd0, out_base[24:0]};
     // auto_seq → (mux) → control_unit config
     wire        auto_busy, auto_done, auto_accel_start;
     wire [9:0]  auto_tile_m, auto_tile_k, auto_tile_n;
@@ -363,7 +373,14 @@ module accelerator #(
         .po_cnt_post_proc     (cnt_post_proc),
         .po_cnt_send          (cnt_send),
         .po_cnt_done          (cnt_done),
-        .po_cnt_total         (cnt_total)
+        .po_cnt_total         (cnt_total),
+        // Phase 5: ECC scratchpad + fault injection
+        .pi_fi_enable         (fi_enable),
+        .pi_ecc_bypass        (ecc_bypass),
+        .pi_fi_bit_pos        (fi_bit_pos),
+        .pi_fi_trigger_cycle  (fi_trigger),
+        .po_ecc_corrected_cnt (ecc_corrected_cnt),
+        .po_ecc_uncorr_cnt    (ecc_uncorr_cnt)
     );
 
     // ═══════════════════════════════════════════════════════════

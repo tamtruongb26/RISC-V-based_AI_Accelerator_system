@@ -98,7 +98,17 @@ module control_unit #(
     output wire [31:0]                   po_cnt_post_proc,
     output wire [31:0]                   po_cnt_send,
     output wire [31:0]                   po_cnt_done,
-    output wire [31:0]                   po_cnt_total
+    output wire [31:0]                   po_cnt_total,
+
+    // ── Phase 5: ECC scratchpad (u_sp_fm) + fault injection ──────────────
+    //   FI tiêm bit-flip vào codeword đọc; ecc_bypass=1 → no-harden (data thô).
+    //   fi_clear tái dùng pi_cnt_clear. Counter đọc qua CNT mux.
+    input  wire                          pi_fi_enable,
+    input  wire                          pi_ecc_bypass,
+    input  wire [4:0]                    pi_fi_bit_pos,
+    input  wire [31:0]                   pi_fi_trigger_cycle,
+    output wire [31:0]                   po_ecc_corrected_cnt,
+    output wire [31:0]                   po_ecc_uncorr_cnt
 );
 
     // ─────────────────────────────────────────────────────────────
@@ -221,10 +231,17 @@ module control_unit #(
         end
     end
 
-    scratchpad #(.DATA_WIDTH(16), .DEPTH(SP_FM_DEPTH)) u_sp_fm (
-        .pi_clk(pi_clk),
-        .pi_wr_en(fm_wr_en), .pi_wr_bank(1'b0), .pi_wr_addr(fm_wr_addr), .pi_wr_data(fm_wr_data),
-        .pi_rd_en(fm_rd_en), .pi_rd_bank(1'b0), .pi_rd_addr(fm_rd_addr), .po_rd_data(sp_fm_rd_data)
+    // Phase 5: u_sp_fm được bảo vệ ECC SECDED + fault injection (drop-in, 1 bank).
+    ecc_scratchpad #(.DATA_WIDTH(16), .DEPTH(SP_FM_DEPTH)) u_sp_fm (
+        .pi_clk(pi_clk), .pi_rst_n(pi_rst_n),
+        .pi_wr_en(fm_wr_en), .pi_wr_addr(fm_wr_addr[9:0]), .pi_wr_data(fm_wr_data),
+        .pi_rd_en(fm_rd_en), .pi_rd_addr(fm_rd_addr[9:0]), .po_rd_data(sp_fm_rd_data),
+        .po_corrected(), .po_double_error(),
+        .pi_fi_enable(pi_fi_enable), .pi_fi_clear(pi_cnt_clear),
+        .pi_fi_bit_pos(pi_fi_bit_pos), .pi_fi_trigger_cycle(pi_fi_trigger_cycle),
+        .pi_ecc_bypass(pi_ecc_bypass),
+        .po_corrected_cnt(po_ecc_corrected_cnt),
+        .po_uncorrectable_cnt(po_ecc_uncorr_cnt)
     );
 
     scratchpad #(.DATA_WIDTH(16), .DEPTH(SP_A_DEPTH)) u_sp_a (

@@ -1,7 +1,7 @@
 `timescale 1ns / 1ps
 
 // ===========================================================================
-// ecc_scratchpad.v — Memory được ECC SECDED bảo vệ (Phase 5c integration)
+// ecc_scratchpad.v — Memory được ECC SECDED bảo vệ
 //
 // Ghép ecc_secded + memory: write → encode (lưu data + check), read → decode
 // (sửa 1-bit, phát hiện 2-bit). Bảo vệ scratchpad/weight bus khỏi SEU.
@@ -40,6 +40,9 @@ module ecc_scratchpad #(
     input  wire [CWSEL_W-1:0]      pi_fi_bit_pos,
     input  wire [31:0]             pi_fi_trigger_cycle,
 
+    // ── ECC bypass (config no-harden): 1 = xuất data thô (KHÔNG sửa) ──
+    input  wire                    pi_ecc_bypass,
+
     // ── Counters ──
     output reg  [31:0]             po_corrected_cnt,
     output reg  [31:0]             po_uncorrectable_cnt
@@ -77,13 +80,16 @@ module ecc_scratchpad #(
     );
 
     // Decode → sửa.
+    wire [DATA_WIDTH-1:0] dec_data;
     ecc_secded #(.DATA_WIDTH(DATA_WIDTH), .PARITY_WIDTH(PARITY_WIDTH)) u_dec (
         .pi_enc_data({DATA_WIDTH{1'b0}}), .po_enc_check(),
         .pi_dec_data (cw_faulted[DATA_WIDTH-1:0]),
         .pi_dec_check(cw_faulted[CW_WIDTH-1:DATA_WIDTH]),
-        .po_dec_data (po_rd_data),
+        .po_dec_data (dec_data),
         .po_corrected(po_corrected), .po_double_error(po_double_error)
     );
+    // Bypass: xuất data thô (đã bị FI lật, KHÔNG sửa) cho config no-harden.
+    assign po_rd_data = pi_ecc_bypass ? cw_faulted[DATA_WIDTH-1:0] : dec_data;
 
     // Counters (đếm khi có read hợp lệ).
     always @(posedge pi_clk or negedge pi_rst_n) begin

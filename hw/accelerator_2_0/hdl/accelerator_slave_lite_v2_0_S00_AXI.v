@@ -49,7 +49,7 @@ module accelerator_slave_lite_v2_0_S00_AXI #(
     //   reg5 (im2col_cfg0) = {n_tiles[29:20],m_tiles[19:10],k_tiles[9:0]}
     //   reg6 (im2col_cfg1) = in_base ; reg7 (0x1C) = out_base
     output wire         po_auto_go,     // slv_reg0[24] 1-shot: bắt đầu GEMM tự hành
-    output wire [31:0]  po_out_base,    // slv_reg7 (0x1C)
+    output wire [31:0]  po_out_base,    // slv_reg7 (0x1C) / Phase5 FI control (xem accel)
     // ── User-side inputs (từ control_unit/data_path) ──
     input  wire         pi_busy,
     input  wire         pi_done,
