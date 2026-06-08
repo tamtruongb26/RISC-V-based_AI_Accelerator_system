@@ -61,6 +61,7 @@ module accelerator #(
     //   accelerator tự lập trình DMA. BD: nối qua interconnect tới DMA control.
     // ═══════════════════════════════════════════════════════════
     output wire [31:0]                           m_axi_dma_awaddr,
+    output wire [2:0]                            m_axi_dma_awprot,
     output wire                                  m_axi_dma_awvalid,
     input  wire                                  m_axi_dma_awready,
     output wire [31:0]                           m_axi_dma_wdata,
@@ -71,6 +72,7 @@ module accelerator #(
     input  wire                                  m_axi_dma_bvalid,
     output wire                                  m_axi_dma_bready,
     output wire [31:0]                           m_axi_dma_araddr,
+    output wire [2:0]                            m_axi_dma_arprot,
     output wire                                  m_axi_dma_arvalid,
     input  wire                                  m_axi_dma_arready,
     input  wire [31:0]                           m_axi_dma_rdata,
@@ -78,6 +80,9 @@ module accelerator #(
     input  wire                                  m_axi_dma_rvalid,
     output wire                                  m_axi_dma_rready
 );
+    // AXI-Lite master PROT (constant — autonomy không phân quyền)
+    assign m_axi_dma_awprot = 3'b000;
+    assign m_axi_dma_arprot = 3'b000;
 
     // ═══════════════════════════════════════════════════════════
     // Internal wires (shim ↔ control_unit ↔ data_path ↔ post_proc)
