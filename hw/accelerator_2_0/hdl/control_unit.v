@@ -158,7 +158,12 @@ module control_unit #(
     reg         ic_start;
     reg  [11:0] a_word;     // index word trong block khi gửi A ra
     reg  [15:0] send_lo;    // nửa thấp A đang pack
-    reg  [7:0]  ho_cur;     // block ho hiện tại
+    reg  [7:0]  ho_cur;     // block ho đang GENERATE (im2col target)
+    // ── Phase 1b: double-buffer im2col (ping-pong 2 bank u_sp_a) ──
+    //   im2col sinh block ho_cur vào gen_bank TRONG KHI SEND đọc block ho_snd
+    //   từ snd_bank (=~gen_bank). gen_ready latch ic_done của prefetch nền.
+    reg         gen_bank, snd_bank, gen_ready;
+    reg  [7:0]  ho_snd;     // block ho đang SEND
 
     // 1 block (1 ho-row) = Wout hàng A × K element. a_nwords = word/block.
     wire [15:0] a_k       = ic_C * ic_KH * ic_KW;
@@ -191,15 +196,17 @@ module control_unit #(
         end
     end
     // read: im2col fm_rd (IM2COL_RUN) hoặc maxpool fm_rd (POOL_RUN).
-    wire        fm_rd_en   = ((state == ST_IM2COL_RUN) && ic_fm_rd_en) ||
-                             ((state == ST_POOL_RUN)   && mp_fm_rd_en);
+    // 1b: im2col đọc FM bất cứ lúc nào nó chạy (kể cả nền trong lúc SEND).
+    wire        fm_rd_en   = (pi_im2col_mode && ic_fm_rd_en) ||
+                             ((state == ST_POOL_RUN) && mp_fm_rd_en);
     wire [10:0] fm_rd_addr = (state == ST_POOL_RUN) ? mp_fm_rd_addr[10:0]
                                                     : ic_fm_rd_addr[10:0];
 
     // ── u_sp_a (output: im2col A hoặc pooled) ──
-    // write: im2col a_wr (IM2COL_RUN) hoặc maxpool out_wr (POOL_RUN). read: SEND.
-    wire        a_wr_en   = ((state == ST_IM2COL_RUN) && ic_a_wr_en) ||
-                            ((state == ST_POOL_RUN)   && mp_out_wr_en);
+    // 1b: im2col ghi gen_bank bất cứ khi chạy (kể cả nền lúc SEND); pool ghi bank 0.
+    wire        a_wr_en   = (pi_im2col_mode && ic_a_wr_en) ||
+                            ((state == ST_POOL_RUN) && mp_out_wr_en);
+    wire        a_wr_bank = (state == ST_POOL_RUN) ? 1'b0 : gen_bank;
     wire [10:0] a_wr_addr = (state == ST_POOL_RUN) ? mp_out_wr_addr[10:0]
                                                    : ic_a_wr_addr[10:0];
     wire [15:0] a_wr_data = (state == ST_POOL_RUN) ? mp_out_wr_data : ic_a_wr_data;
@@ -222,8 +229,8 @@ module control_unit #(
 
     scratchpad #(.DATA_WIDTH(16), .DEPTH(SP_A_DEPTH)) u_sp_a (
         .pi_clk(pi_clk),
-        .pi_wr_en(a_wr_en), .pi_wr_bank(1'b0), .pi_wr_addr(a_wr_addr), .pi_wr_data(a_wr_data),
-        .pi_rd_en(a_rd_en), .pi_rd_bank(1'b0), .pi_rd_addr(a_rd_addr), .po_rd_data(sp_a_rd_data)
+        .pi_wr_en(a_wr_en), .pi_wr_bank(a_wr_bank), .pi_wr_addr(a_wr_addr), .pi_wr_data(a_wr_data),
+        .pi_rd_en(a_rd_en), .pi_rd_bank(snd_bank),  .pi_rd_addr(a_rd_addr), .po_rd_data(sp_a_rd_data)
     );
 
     im2col #(.DATA_WIDTH(16), .ADDR_WIDTH(16), .DIM_WIDTH(8)) u_im2col (
@@ -410,6 +417,10 @@ module control_unit #(
             send_lo               <= 16'd0;
             ho_cur                <= 8'd0;
             os_kt                 <= 10'd0;
+            gen_bank              <= 1'b0;
+            snd_bank              <= 1'b0;
+            gen_ready             <= 1'b0;
+            ho_snd                <= 8'd0;
         end else begin
             // ── Default deassertions (chỉ pulse khi cần) ──
             po_dp_weight_load <= 1'b0;
@@ -417,6 +428,8 @@ module control_unit #(
             po_pp_valid_in    <= 1'b0;
             ic_start          <= 1'b0;
             mp_start          <= 1'b0;
+            // 1b: latch hoàn tất của im2col nền (prefetch) — chỉ trong lúc SEND.
+            if (ic_done) gen_ready <= 1'b1;
 
             case (state)
 
@@ -427,9 +440,13 @@ module control_unit #(
                     po_busy <= 1'b1;
                     if (pi_im2col_mode || pi_pool_mode) begin
                         // Chế độ im2col hoặc maxpool — nạp feature map → scratchpad.
-                        state  <= ST_LOAD_FM;
-                        fm_idx <= 16'd0;
-                        ho_cur <= 8'd0;
+                        state    <= ST_LOAD_FM;
+                        fm_idx   <= 16'd0;
+                        ho_cur   <= 8'd0;
+                        ho_snd   <= 8'd0;
+                        gen_bank <= 1'b0;   // block 0 sinh vào bank 0
+                        snd_bank <= 1'b0;
+                        gen_ready<= 1'b0;
                     end else if (pi_os_mode) begin
                         // Chế độ Output-Stationary dùng chung array — nạp W tile vào array
                         // qua weight-load WS (psum_reg giữ vì os_mode=1).
@@ -485,11 +502,22 @@ module control_unit #(
                 end
             end
 
-            // ─────────── IM2COL: chạy engine (FM→A trong scratchpad) ──────
+            // ─────────── IM2COL: điểm SYNC double-buffer (1b) ──────
+            //   Chờ block đang generate xong (gen_ready) → chốt làm block SEND
+            //   (snd_bank=gen_bank), rồi PREFETCH block kế vào bank kia để overlap
+            //   với SEND. Block cuối: không prefetch.
             ST_IM2COL_RUN: begin
-                if (ic_done) begin
-                    a_word <= 12'd0;
-                    state  <= ST_SEND_A_R0;
+                if (gen_ready) begin
+                    ho_snd   <= ho_cur;          // block vừa sinh xong → SEND
+                    snd_bank <= gen_bank;        // đọc từ bank vừa ghi
+                    a_word   <= 12'd0;
+                    if (ho_cur + 8'd1 < ic_Hout) begin
+                        gen_bank  <= ~gen_bank;  // prefetch block kế vào bank đối
+                        ho_cur    <= ho_cur + 8'd1;
+                        ic_start  <= 1'b1;
+                        gen_ready <= 1'b0;
+                    end
+                    state <= ST_SEND_A_R0;
                 end
             end
 
@@ -508,14 +536,13 @@ module control_unit #(
                         if (a_word + 12'd1 >= pool_nwords[11:0]) state <= ST_DONE;
                         else begin a_word <= a_word + 12'd1; state <= ST_SEND_A_R0; end
                     end else if (a_word + 12'd1 >= a_nwords[11:0]) begin
-                        // im2col: hết word của block này → sang block ho kế hoặc xong
-                        if (ho_cur + 8'd1 >= ic_Hout) begin
+                        // im2col: hết word block ho_snd → block cuối thì xong, không
+                        // thì về SYNC chờ prefetch block kế (1b — thường đã xong).
+                        if (ho_snd + 8'd1 >= ic_Hout) begin
                             state <= ST_DONE;
                         end else begin
-                            ho_cur   <= ho_cur + 8'd1;
-                            a_word   <= 12'd0;
-                            ic_start <= 1'b1;       // im2col block ho kế
-                            state    <= ST_IM2COL_RUN;
+                            a_word <= 12'd0;
+                            state  <= ST_IM2COL_RUN;
                         end
                     end else begin
                         a_word <= a_word + 12'd1;
