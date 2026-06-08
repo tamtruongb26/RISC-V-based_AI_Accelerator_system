@@ -1,7 +1,7 @@
 `timescale 1ns / 1ps
 
 // ===========================================================================
-// ecc_secded.v — Hamming SECDED encoder + decoder (Phase 5c, Vấn đề 7c)
+// ecc_secded.v — Hamming SECDED encoder + decoder (giải Vấn đề 7c)
 //
 // Single Error Correct, Double Error Detect. Bảo vệ scratchpad weight bus khỏi
 // SEU. Systematic Hamming + 1 overall parity.

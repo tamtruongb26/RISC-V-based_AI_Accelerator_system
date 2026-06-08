@@ -1,10 +1,10 @@
 `timescale 1ns / 1ps
 
 // ===========================================================================
-// scratchpad.v — On-chip SRAM buffer cho weight + input (Phase 1a)
+// scratchpad.v — On-chip SRAM buffer cho weight + input
 //
 // 2 bank ping-pong, mỗi bank dual-port (1 write port, 1 read port độc lập).
-// Trong double-buffering (Phase 1b): Load FSM ghi 1 bank trong khi Exec FSM
+// Trong double-buffering: Load FSM ghi 1 bank trong khi Exec FSM
 // đọc bank kia → 2 port chọn bank riêng (pi_wr_bank / pi_rd_bank).
 //
 // Việc TOGGLE bank (ping-pong) nằm ở control_unit, KHÔNG ở đây — module này

@@ -1,7 +1,7 @@
 `timescale 1ns / 1ps
 
 // ===========================================================================
-// tmr_voter.v — Triple Modular Redundancy majority voter (Phase 5b)
+// tmr_voter.v — Triple Modular Redundancy majority voter
 //
 // Vấn đề 7b: FSM state (hoặc register quan trọng) là single point of failure với
 // SEU. Triple hóa state thành a/b/c, voter chọn majority bit-wise → 1 bit flip
