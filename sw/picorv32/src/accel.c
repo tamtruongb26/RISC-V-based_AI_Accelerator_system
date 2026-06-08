@@ -143,13 +143,14 @@ void accel_counters_snapshot(accel_counters_t *out)
     out->sparsity_skip = accel_counter_read(RAAS_CNT_IDX_SPARSITY);
     out->ecc_corrected = accel_counter_read(RAAS_CNT_IDX_ECC_CORRECTED);
     out->ecc_uncorr    = accel_counter_read(RAAS_CNT_IDX_ECC_UNCORR);
+    out->tmr_mismatch  = accel_counter_read(RAAS_CNT_IDX_TMR_MISMATCH);
 }
 
 /* Phase 5: cấu hình fault injection (gói toàn bộ vào reg7 = DESC_OUT_BASE). */
-void accel_fault_config(uint32_t bit_pos, uint32_t trigger,
-                        uint32_t ecc_bypass, uint32_t enable)
+void accel_fault_config(uint32_t bit_pos, uint32_t trigger, uint32_t ecc_bypass,
+                        uint32_t target, uint32_t enable)
 {
     accel_write(RAAS_ACCEL_DESC_OUT_BASE,
-                RAAS_FI_PACK(bit_pos, ecc_bypass, enable, trigger));
+                RAAS_FI_PACK(bit_pos, ecc_bypass, enable, target, trigger));
     fence_iorw();
 }
