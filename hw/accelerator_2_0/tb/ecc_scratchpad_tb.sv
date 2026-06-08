@@ -38,6 +38,7 @@ module ecc_scratchpad_tb;
         .po_rd_data(rd_data), .po_corrected(corrected), .po_double_error(double_err),
         .pi_fi_enable(fi_enable), .pi_fi_clear(fi_clear),
         .pi_fi_bit_pos(fi_bit_pos), .pi_fi_trigger_cycle(fi_trigger_cycle),
+        .pi_ecc_bypass(1'b0),       // Phase 5: chế độ ECC bình thường (không bypass)
         .po_corrected_cnt(corrected_cnt), .po_uncorrectable_cnt(uncorrectable_cnt)
     );
 
