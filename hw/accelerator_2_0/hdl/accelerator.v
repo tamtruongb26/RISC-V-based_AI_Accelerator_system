@@ -61,7 +61,7 @@ module accelerator #(
     // Internal wires (shim ↔ control_unit ↔ data_path ↔ post_proc)
     // ═══════════════════════════════════════════════════════════
 
-    // ── AXI-Lite shim → control_unit config (Phase 0: packed → unpack) ──
+    // ── Cấu hình từ AXI-Lite shim sang control_unit (unpack gói dữ liệu) ──
     wire [3:0] tile_m_4, tile_k_4, tile_n_4;
     wire [9:0] tile_m_size = {6'd0, tile_m_4};
     wire [9:0] tile_k_size = {6'd0, tile_k_4};
@@ -69,29 +69,29 @@ module accelerator #(
     wire [1:0] act_mode;
     wire       start;
     wire       busy, done;
-    // ── Phase 1a-i: HW K-accumulation control ──
+    // ── Điều khiển cộng dồn phần tử K phần cứng ──
     wire       acc_accum;
     wire       post_skip;
-    // ── Phase 2a: HW im2col mode ──
+    // ── Chế độ im2col phần cứng ──
     wire       im2col_mode;
     wire [31:0] im2col_cfg0;
     wire [31:0] im2col_cfg1;
-    wire       os_mode;          // Phase 3a: OS dataflow (FC)
-    wire       pool_mode;        // Phase 2b: HW maxpool
-    // ── Phase 1a-ii: data reuse control ──
+    wire       os_mode;          // Luồng dữ liệu Output-Stationary (cho lớp Fully-Connected)
+    wire       pool_mode;        // Chế độ Max-Pooling phần cứng
+    // ── Điều khiển tái sử dụng dữ liệu (data reuse) ──
     wire       skip_w_load;
     wire [1:0] acc_slot;
     wire       skip_in_load;
 
-    // ── Phase 0 instrumentation: counter control + readback ──
+    // ── Điều khiển và đọc lại bộ đếm hiệu năng (Performance Counter) ──
     wire        cnt_clear;
     wire [3:0]  cnt_sel;
     wire [31:0] cnt_idle, cnt_load_w, cnt_load_b, cnt_load_in;
     wire [31:0] cnt_compute, cnt_post_proc, cnt_send, cnt_done;
-    wire [31:0] cnt_total, cnt_pe_active;
+    wire [31:0] cnt_total, cnt_pe_active, cnt_sparsity_skip;
     reg  [31:0] cnt_val_mux;
 
-    // 10-to-1 counter mux - chọn counter dựa vào cnt_sel.
+    // 11-to-1 counter mux - chọn counter dựa vào cnt_sel.
     // Index map khớp với mô tả trong slave_lite.
     always @(*) begin
         case (cnt_sel)
@@ -105,6 +105,7 @@ module accelerator #(
             4'd7:  cnt_val_mux = cnt_done;
             4'd8:  cnt_val_mux = cnt_total;
             4'd9:  cnt_val_mux = cnt_pe_active;
+            4'd10: cnt_val_mux = cnt_sparsity_skip;
             default: cnt_val_mux = 32'd0;
         endcase
     end
@@ -129,7 +130,7 @@ module accelerator #(
     wire [SA_N-1:0]               dp_valid_left;
     wire [SA_N*ACC_WIDTH-1:0]     dp_psum_bottom;
     wire [SA_N-1:0]               dp_valid_bottom;
-    // Phase 3a-merge: OS dual-mode (control_unit ↔ data_path)
+    // Điều khiển chế độ Output-Stationary (control_unit ↔ data_path)
     wire                          dp_os_mode, dp_os_init, dp_os_valid;
     wire [SA_N*ACC_WIDTH-1:0]     dp_os_c;
 
@@ -281,7 +282,7 @@ module accelerator #(
         .po_pp_act_mode       (pp_act_mode),
         .pi_pp_data_out       (pp_data_out),
         .pi_pp_valid_out      (pp_valid_out),
-        // Phase 0 instrumentation
+        // Bộ đếm hiệu năng hệ thống
         .pi_cnt_clear         (cnt_clear),
         .po_cnt_idle          (cnt_idle),
         .po_cnt_load_w        (cnt_load_w),
@@ -311,14 +312,15 @@ module accelerator #(
         .pi_valid_left      (dp_valid_left),
         .po_psum_bottom     (dp_psum_bottom),
         .po_valid_bottom    (dp_valid_bottom),
-        // Phase 3a-merge: OS dual-mode
+        // Chế độ Output-Stationary
         .pi_os_mode         (dp_os_mode),
         .pi_os_init         (dp_os_init),
         .pi_os_valid        (dp_os_valid),
         .po_os_c            (dp_os_c),
-        // Phase 0 instrumentation
+        // Bộ đếm chu kỳ hiệu năng
         .pi_cnt_clear       (cnt_clear),
-        .po_cnt_pe_active   (cnt_pe_active)
+        .po_cnt_pe_active   (cnt_pe_active),
+        .po_cnt_sparsity_skip (cnt_sparsity_skip)
     );
 
     // ═══════════════════════════════════════════════════════════

@@ -114,7 +114,8 @@
 #define RAAS_CNT_IDX_DONE        7u
 #define RAAS_CNT_IDX_TOTAL       8u
 #define RAAS_CNT_IDX_PE_ACTIVE   9u
-#define RAAS_CNT_COUNT           10u
+#define RAAS_CNT_IDX_SPARSITY    10u   /* Phase 4: row-feed thưa (valid && a==0) */
+#define RAAS_CNT_COUNT           11u
 
 /* ============================================================================
  * AXI DMA register offsets (Xilinx PG021 standard, Simple Mode)

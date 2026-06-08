@@ -452,7 +452,7 @@ int main(void)
 
         /* ── Phase 0/3b: per-layer + per-state cycle breakdown (prove bottleneck) ── */
         Xil_DCacheInvalidateRange(DDR_PS_BASE + LENET_DDR_LAYER_CYC_OFF, 9 * 4);
-        Xil_DCacheInvalidateRange(DDR_PS_BASE + LENET_DDR_ACCEL_CNT_OFF, 10 * 4);
+        Xil_DCacheInvalidateRange(DDR_PS_BASE + LENET_DDR_ACCEL_CNT_OFF, 11 * 4);
         {
             uint32_t lc[9];
             int i;
@@ -469,10 +469,10 @@ int main(void)
                 xil_printf("  %s : %u (%u%%)\r\n", lname[i], (unsigned)d, (unsigned)pct);
             }
 
-            uint32_t ac[10];
-            for (i = 0; i < 10; i++)
+            uint32_t ac[11];
+            for (i = 0; i < 11; i++)
                 ac[i] = Xil_In32(DDR_PS_BASE + LENET_DDR_ACCEL_CNT_OFF + i * 4);
-            /* ac: 0 idle,1 load_w,2 load_b,3 load_in,4 compute,5 post,6 send,7 done,8 total,9 pe_active */
+            /* ac: 0 idle,1 load_w,2 load_b,3 load_in,4 compute,5 post,6 send,7 done,8 total,9 pe_active,10 sparsity_skip */
             uint32_t tot = ac[8] ? ac[8] : 1u;
             xil_printf("\r\n--- Accelerator State Breakdown (total=%u) ---\r\n", (unsigned)ac[8]);
             xil_printf("  IDLE(orchestrate): %u (%u%%)\r\n", (unsigned)ac[0], (unsigned)((uint64_t)ac[0]*100/tot));
@@ -482,6 +482,13 @@ int main(void)
             xil_printf("  POST_PROC        : %u (%u%%)\r\n", (unsigned)ac[5], (unsigned)((uint64_t)ac[5]*100/tot));
             xil_printf("  SEND_OUT         : %u (%u%%)\r\n", (unsigned)ac[6], (unsigned)((uint64_t)ac[6]*100/tot));
             xil_printf("  NOTE: IDLE%% = PicoRV32 orchestration (DMA setup/copy/poll)\r\n");
+
+            /* Phase 4: sparsity skip rate = skip / (SA_N=8 × compute cycles) */
+            uint32_t denom = 8u * ac[4];
+            uint32_t sp_pct = denom ? (uint32_t)(((uint64_t)ac[10] * 100u) / denom) : 0u;
+            xil_printf("\r\n--- Sparsity (operand isolation, Phase 4) ---\r\n");
+            xil_printf("  Zero row-feeds skipped: %u\r\n", (unsigned)ac[10]);
+            xil_printf("  Skip rate (~ReLU sparsity): %u%% of MAC row-feeds\r\n", (unsigned)sp_pct);
         }
         break;
 

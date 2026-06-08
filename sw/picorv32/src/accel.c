@@ -85,7 +85,7 @@ int accel_wait_done(uint32_t timeout_cycles)
             return 0;
         }
     }
-    return -1;
+    return -3;  /* -3 = accel timeout (distinct from DMA: -1=timeout, -2=error) */
 }
 
 uint32_t accel_get_status(void)
@@ -121,4 +121,5 @@ void accel_counters_snapshot(accel_counters_t *out)
     out->done      = accel_counter_read(RAAS_CNT_IDX_DONE);
     out->total     = accel_counter_read(RAAS_CNT_IDX_TOTAL);
     out->pe_active = accel_counter_read(RAAS_CNT_IDX_PE_ACTIVE);
+    out->sparsity_skip = accel_counter_read(RAAS_CNT_IDX_SPARSITY);
 }

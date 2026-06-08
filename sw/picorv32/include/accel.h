@@ -91,6 +91,7 @@ typedef struct {
     uint32_t done;
     uint32_t total;
     uint32_t pe_active;
+    uint32_t sparsity_skip;   /* Phase 4: row-feed thưa (valid && a==0) */
 } accel_counters_t;
 
 void accel_counters_snapshot(accel_counters_t *out);

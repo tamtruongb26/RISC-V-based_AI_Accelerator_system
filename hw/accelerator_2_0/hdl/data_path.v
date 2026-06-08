@@ -27,7 +27,7 @@ module data_path #(
     output wire [SA_N*ACC_WIDTH-1:0]      po_psum_bottom,
     output wire [SA_N-1:0]                po_valid_bottom,
 
-    // ── Phase 3a-merge: Output-Stationary mode ──
+    // ── Chế độ Output-Stationary (OS) ──
     //   pi_os_mode=1: a broadcast theo hàng (pi_a_left[r] → mọi cột), PE cộng dồn
     //   cục bộ; po_os_c[n] = Σ_k psum_reg[k][n] (adder tree tap psum chain, 0 DSP).
     input  wire                           pi_os_mode,
@@ -35,14 +35,18 @@ module data_path #(
     input  wire                           pi_os_valid,
     output wire [SA_N*ACC_WIDTH-1:0]      po_os_c,
 
-    // ── Phase 0 instrumentation: PE-active cycle counter ───────────
+    // ── Bộ đếm chu kỳ hoạt động của PE (PE-active cycle counter) ───────────
     //   Mỗi cycle có ≥1 hàng input (pi_a_left[r] ≠ 0 AND pi_valid_left[r])
-    //   → cnt_pe_active += 1. Dùng làm baseline cho phân tích sparsity
-    //   (Phase 4) - sau khi bật zero-skip, counter này sẽ giảm theo
-    //   tỉ lệ thưa của activation.
+    //   → cnt_pe_active += 1. Dùng làm baseline cho phân tích độ thưa (sparsity).
+    //   Khi bật zero-skip, counter này sẽ giảm theo tỉ lệ thưa của activation.
     //   pi_cnt_clear = 1 cycle pulse → clear về 0.
     input  wire                           pi_cnt_clear,
-    output wire [31:0]                    po_cnt_pe_active
+    output wire [31:0]                    po_cnt_pe_active,
+    // ── Phase 4: bộ đếm row-feed bị cô lập do thưa (operand isolation) ──────
+    //   Mỗi cycle cộng số hàng valid nhưng a==0 (multiplier giữ operand cũ →
+    //   tiết kiệm power). skip_rate ≈ cnt/(SA_N×cnt_compute). Gồm cả zero hữu
+    //   ích (ReLU) lẫn zero cấu trúc của skew ramp.
+    output wire [31:0]                    po_cnt_sparsity_skip
 );
     // ---------------------------------------------------------------------
     //   a_h[r][0]   = pi_a_left[r]                  (từ port ngoài)
@@ -101,8 +105,8 @@ module data_path #(
                     .pi_weight_load(pe_wload),
                     .pi_w_in       (pi_weight_data[c*DATA_WIDTH +: DATA_WIDTH]),
 
-                    // Phase 3a-merge: OS → a broadcast (pi_a_left[r] tới mọi cột);
-                    // WS → chain PE(r,c-1)→PE(r,c)→PE(r,c+1).
+                    // Chế độ OS: phát (broadcast) dữ liệu a (pi_a_left[r] tới mọi cột);
+                    // WS: truyền nối tiếp PE(r,c-1)→PE(r,c)→PE(r,c+1).
                     .pi_os_mode    (pi_os_mode),
                     .pi_os_init    (pi_os_init),
                     .pi_a_in       (pi_os_mode ? pi_a_left[r*DATA_WIDTH +: DATA_WIDTH]
@@ -131,9 +135,9 @@ module data_path #(
     endgenerate
 
     // ---------------------------------------------------------------------
-    // Phase 3a-merge: OS column reduce — po_os_c[n] = Σ_k psum_reg[k][n].
+    // Chế độ OS: Thu gọn cột (column reduce) — po_os_c[n] = Σ_k psum_reg[k][n].
     //   psum_v[r+1][n] = PE(r,n).po_psum_out = PE(r,n).psum_reg (tap sẵn có).
-    //   Adder tree tổ hợp (0 DSP) — thay 64 multiplier của os_array cũ.
+    //   Bộ cộng tổ hợp (không dùng DSP) — thay thế 64 bộ nhân của cấu trúc cũ.
     // ---------------------------------------------------------------------
     genvar oc2, sr;
     generate
@@ -148,14 +152,14 @@ module data_path #(
     endgenerate
 
     // ---------------------------------------------------------------------
-    // Phase 0 instrumentation: PE-active cycle counter
+    // Bộ đếm hiệu năng: Đếm số chu kỳ PE hoạt động thực sự
     //   active_row[r] = pi_valid_left[r] AND (pi_a_left[r] != 0)
     //   any_active    = |active_row → cycle này có ≥1 PE đang nhận
-    //                   activation hữu ích (non-zero).
+    //                   activation hữu ích (khác không).
     //
-    // Trước sparsity skip (Phase 4): kỳ vọng counter ≈ cnt_compute (vì
-    // valid_left[r]=1 mọi cycle COMPUTE và đa số activation non-zero).
-    // Sau sparsity skip + ReLU: counter sẽ giảm theo tỉ lệ thưa.
+    // Trước khi tối ưu sparsity: kỳ vọng counter ≈ cnt_compute (vì
+    // valid_left[r]=1 mọi chu kỳ tính toán và đa số activation khác không).
+    // Sau khi tối ưu sparsity và kích hoạt ReLU: bộ đếm sẽ giảm tương ứng với tỷ lệ thưa.
     // ---------------------------------------------------------------------
     reg [31:0] cnt_pe_active;
     assign po_cnt_pe_active = cnt_pe_active;
@@ -179,6 +183,37 @@ module data_path #(
             cnt_pe_active <= 32'd0;
         else if (any_active)
             cnt_pe_active <= cnt_pe_active + 32'd1;
+    end
+
+    // ── Phase 4: đếm row-feed thưa (valid && a==0) — popcount mỗi cycle ──────
+    reg [31:0] cnt_sparsity_skip;
+    assign po_cnt_sparsity_skip = cnt_sparsity_skip;
+
+    wire [SA_N-1:0] skip_row;
+    genvar sk;
+    generate
+        for (sk = 0; sk < SA_N; sk = sk + 1) begin : gen_skip
+            assign skip_row[sk] = pi_valid_left[sk] &&
+                                  (pi_a_left[sk*DATA_WIDTH +: DATA_WIDTH] ==
+                                   {DATA_WIDTH{1'b0}});
+        end
+    endgenerate
+
+    reg [3:0] skip_pop;
+    integer si;
+    always @(*) begin
+        skip_pop = 4'd0;
+        for (si = 0; si < SA_N; si = si + 1)
+            skip_pop = skip_pop + {3'd0, skip_row[si]};
+    end
+
+    always @(posedge pi_clk or negedge pi_rst_n) begin : sparsity_cnt
+        if (!pi_rst_n)
+            cnt_sparsity_skip <= 32'd0;
+        else if (pi_cnt_clear)
+            cnt_sparsity_skip <= 32'd0;
+        else
+            cnt_sparsity_skip <= cnt_sparsity_skip + {28'd0, skip_pop};
     end
 
 endmodule
