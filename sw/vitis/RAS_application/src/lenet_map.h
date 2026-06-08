@@ -105,34 +105,15 @@
 #define LENET_DDR_HW_CYCLES_OFF   0x0004000Cu  /* 4B hardware cycles */
 #define LENET_DDR_SW_CYCLES_OFF   0x00040010u  /* 4B software cycles */
 
-/* --- Phase 0 instrumentation: per-layer + accelerator counter snapshots ---
- *
- * LAYER_CYC[i] = Pico rdcycle taken right after layer i completes.
- *   i=0  → start of inference (immediately after accel_counters_clear)
- *   i=1  → after Conv1     i=2 → after Pool1
- *   i=3  → after Conv2     i=4 → after Pool2
- *   i=5  → after FC1       i=6 → after FC2
- *   i=7  → after FC3       i=8 → after argmax
- * Tổng 9 × 4B = 36B. Delta giữa các slot = cycle count của layer đó.
- *
- * ACCEL_CNT = accel_counters_t snapshot tại cuối inference (40B).
- * Layout = (idle, load_w, load_b, load_in, compute, post_proc, send, done,
- *          total, pe_active) — 10 × 4B. Tổng accelerator behavior breakdown.
- */
-#define LENET_DDR_LAYER_CYC_OFF   0x00040020u  /* 9 × 4B = 36B */
-#define LENET_DDR_ACCEL_CNT_OFF   0x00040050u  /* 10 × 4B = 40B */
-#define LENET_DDR_INSTR_END_OFF   0x00040080u  /* end of instrumentation block */
+/* --- Phase 0 instrumentation (firmware writes during HW run) --- */
+#define LENET_DDR_LAYER_CYC_OFF   0x00040020u  /* 9 × 4B: cumul rdcycle/layer */
+#define LENET_DDR_ACCEL_CNT_OFF   0x00040050u  /* 10 × 4B: accel per-state cnt */
 
-/* --- Error debug (firmware writes on failure, PS reads via DDR) ---
- *   ERR_CODE     : raw return value from lenet5_infer() (-1, -2, -3)
- *   ERR_DMA_MM2S : snapshot of MM2S DMASR at time of error
- *   ERR_DMA_S2MM : snapshot of S2MM DMASR at time of error
- *   ERR_ACCEL    : snapshot of accelerator STATUS at time of error
- */
+/* --- Error debug (firmware writes on failure, PS reads via DDR) --- */
 #define LENET_DDR_ERR_CODE_OFF    0x00040080u  /* 4B signed error code */
-#define LENET_DDR_ERR_DMA_MM2S_OFF 0x00040084u /* 4B DMA MM2S DMASR */
-#define LENET_DDR_ERR_DMA_S2MM_OFF 0x00040088u /* 4B DMA S2MM DMASR */
-#define LENET_DDR_ERR_ACCEL_OFF   0x0004008Cu  /* 4B accel STATUS */
+#define LENET_DDR_ERR_DMA_MM2S_OFF 0x00040084u /* 4B DMA MM2S DMASR snapshot */
+#define LENET_DDR_ERR_DMA_S2MM_OFF 0x00040088u /* 4B DMA S2MM DMASR snapshot */
+#define LENET_DDR_ERR_ACCEL_OFF   0x0004008Cu  /* 4B accel STATUS snapshot */
 #define LENET_DDR_ERR_TILE_N0_OFF 0x00040090u  /* 4B: n0 index when error */
 #define LENET_DDR_ERR_TILE_K0_OFF 0x00040094u  /* 4B: k0 index when error */
 #define LENET_DDR_ERR_CFG_OFF     0x00040098u  /* 4B: CFG value written to accel */

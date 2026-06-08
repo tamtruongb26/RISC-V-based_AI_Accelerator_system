@@ -205,57 +205,58 @@ int gemm_tiled(uint32_t a_addr, uint32_t w_addr, uint32_t b_addr,
     return 0;
 }
 
-/* ── Phase 3a: Output-Stationary GEMM cho FC (M=1) — util 12.5%→100% ─────
- * Map K→hàng, N→cột; mỗi cycle 64 MAC song song. Stream weight tile (32 word)
- * + a-vector (4 word), KHÔNG bias (OS clear bias=0; bias cộng SW nếu cần).
- * Cộng dồn K-tile in-place. C[1×N] = A[1×K] × W[K×N]. */
+/* ── Phase 3a/3b: Output-Stationary GEMM cho FC (M=1) — util 12.5%→100% ───
+ * Map K→hàng, N→cột; mỗi cycle 64 MAC song song. C[1×N] = A[1×K] × W[K×N].
+ *
+ * Phase 3b CISC: gom TẤT CẢ K-tile vào 1 invocation/N-tile. HW tự lặp K-tile
+ * nội bộ (số K-tile qua IM2COL_CFG0), cộng dồn psum. Stream 1 lần liền mạch
+ * [W(32w) a(4w)]×k_tiles. → FC1 480 invocation → 15 (cắt overhead orchestration).
+ * KHÔNG bias (OS clear bias=0; bias cộng SW nếu cần). */
 int gemm_os(uint32_t a_addr, uint32_t w_addr, uint32_t c_addr,
             uint32_t K, uint32_t N, uint32_t act_mode)
 {
-    uint32_t tile_w   = LENET_ADDR(LENET_DDR_TILE_W_OFF);
-    uint32_t tile_in  = LENET_ADDR(LENET_DDR_TILE_IN_OFF);
+    uint32_t stream   = LENET_ADDR(LENET_DDR_OS_STAGE_OFF);
     uint32_t tile_out = LENET_ADDR(LENET_DDR_TILE_OUT_OFF);
+    uint32_t k_tiles  = (K + SA - 1u) / SA;
+    /* byte/K-tile = (64 W + 8 a) elem × 2B = 144B (= 36 word) */
+    uint32_t stream_bytes = k_tiles * (SA * SA + SA) * 2u;
     int rc;
 
     for (uint32_t n0 = 0; n0 < N; n0 += SA) {
         uint32_t n_size = umin(SA, N - n0);
 
+        /* ── Dựng stream interleaved [W tile | a-vector]×k_tiles ── */
+        uint32_t soff = stream;
         for (uint32_t k0 = 0; k0 < K; k0 += SA) {
             uint32_t k_size = umin(SA, K - k0);
-            uint32_t last_k = (k0 + SA >= K);
-
-            /* Weight tile W[k0,n0] (zero-pad nếu k_size/n_size < 8) */
-            copy_sub_to_tile(w_addr + (k0 * N + n0) * 2u, N, tile_w, k_size, n_size);
-            /* a-vector A[0, k0:+k_size] (M=1) */
-            copy_sub_to_tile(a_addr + k0 * 2u, K, tile_in, 1u, k_size);
-
-            uint32_t flags = RAAS_CFG_OS_MODE
-                           | (k0 == 0u ? 0u : RAAS_CFG_ACC_ACCUM)
-                           | (last_k    ? 0u : RAAS_CFG_POST_SKIP);
-            uint32_t this_act = last_k ? act_mode : RAAS_CFG_ACT_BYPASS;
-
-            dma_reset();
-            accel_configure_and_start_flags(1u, SA, SA, this_act, flags);
-
-            if (last_k)
-                dma_s2mm_recv(tile_out, SA * 2u);          /* M=1×N=8 → 4 word */
-
-            /* OS FSM: LOAD_W (32 word) → LOAD_A (4 word). KHÔNG bias. */
-            rc = dma_mm2s_send_and_wait(tile_w, SA * (SA / 2u) * 4u, TILE_DMA_TIMEOUT);
-            if (rc < 0) return rc;
-            rc = dma_mm2s_send_and_wait(tile_in, (SA / 2u) * 4u, TILE_DMA_TIMEOUT);
-            if (rc < 0) return rc;
-
-            rc = accel_wait_done(TILE_ACCEL_TIMEOUT);
-            if (rc < 0) return rc;
-
-            if (last_k) {
-                rc = dma_s2mm_wait(TILE_DMA_TIMEOUT);
-                if (rc < 0) return rc;
-                for (uint32_t c = 0; c < n_size; c++)
-                    ddr_write16(c_addr + (n0 + c) * 2u, ddr_read16(tile_out + c * 2u));
-            }
+            /* W tile W[k0,n0] → 8×8 (64 elem), copy_sub_to_tile tự zero-pad */
+            copy_sub_to_tile(w_addr + (k0 * N + n0) * 2u, N, soff, k_size, n_size);
+            soff += SA * SA * 2u;                       /* +64 elem */
+            /* a-vector A[0, k0:+k_size] → 8 elem (zero-pad phần thừa) */
+            for (uint32_t i = 0; i < SA; i++)
+                ddr_write16(soff + i * 2u,
+                            i < k_size ? ddr_read16(a_addr + (k0 + i) * 2u) : 0);
+            soff += SA * 2u;                            /* +8 elem */
         }
+
+        /* Debug: ghi tile info để dump lỗi biết N-tile nào fail */
+        mmio_write32(LENET_ADDR(LENET_DDR_ERR_TILE_N0_OFF), n0);
+        mmio_write32(LENET_ADDR(LENET_DDR_ERR_TILE_K0_OFF), k_tiles);
+
+        accel_im2col_config(k_tiles, 0u);   /* IM2COL_CFG0 = số K-tile (OS reuse) */
+        dma_reset();
+        accel_configure_and_start_flags(1u, SA, SA, act_mode, RAAS_CFG_OS_MODE);
+        dma_s2mm_recv(tile_out, SA * 2u);    /* M=1×N=8 → 4 word */
+
+        rc = dma_mm2s_send_and_wait(stream, stream_bytes, TILE_DMA_TIMEOUT);
+        if (rc < 0) return rc;
+        rc = accel_wait_done(TILE_ACCEL_TIMEOUT);
+        if (rc < 0) return rc;
+        rc = dma_s2mm_wait(TILE_DMA_TIMEOUT);
+        if (rc < 0) return rc;
+
+        for (uint32_t c = 0; c < n_size; c++)
+            ddr_write16(c_addr + (n0 + c) * 2u, ddr_read16(tile_out + c * 2u));
     }
     return 0;
 }

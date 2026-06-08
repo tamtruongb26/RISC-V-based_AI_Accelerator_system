@@ -4,7 +4,7 @@ module control_unit #(
     parameter integer SA_N       = 8,
     parameter integer DATA_WIDTH = 16,
     parameter integer ACC_WIDTH  = 40,
-    // Phase 1a-ii-B: số output-tile slot trong accumulator (blocking).
+    // Số output-tile slot trong accumulator (blocking).
     // psum_buf[NUM_SLOTS][8][8] register → reuse = NUM_SLOTS× (cắt DDR weight).
     parameter integer NUM_SLOTS  = 4
 )(
@@ -17,30 +17,30 @@ module control_unit #(
     input  wire [9:0]                    pi_tile_n_size,
     input  wire [1:0]                    pi_act_mode,
     input  wire                          pi_start,
-    // ── Phase 1a-i: HW K-accumulation control ──
+    // ── Điều khiển cộng dồn phần tử K phần cứng ──
     //   pi_acc_accum = 1 : COMPUTE cộng dồn vào psum_buf (K-tile > 0)
     //                = 0 : ghi đè psum_buf (K-tile 0 / single-tile — mặc định cũ)
     //   pi_post_skip = 1 : sau COMPUTE bỏ POST_PROC+SEND, về DONE (K-tile giữa)
     //                = 0 : chạy POST_PROC+SEND như cũ (K-tile cuối / single)
     input  wire                          pi_acc_accum,
     input  wire                          pi_post_skip,
-    // ── Phase 1a-ii: data reuse ──
+    // ── Tối ưu tái sử dụng dữ liệu (data reuse) ──
     //   pi_skip_w_load = 1 : bỏ LOAD_W, giữ weight cũ trong array (reuse).
     input  wire                          pi_skip_w_load,
     //   pi_acc_slot : chọn output-tile slot trong accumulator (blocking).
     input  wire [1:0]                    pi_acc_slot,
     //   pi_skip_in_load = 1 : bỏ LOAD_IN, giữ input cũ trong input_buf (reuse).
     input  wire                          pi_skip_in_load,
-    // ── Phase 2a: HW im2col mode ──
+    // ── Chế độ chuyển đổi im2col phần cứng ──
     //   pi_im2col_mode = 1 : accelerator chạy im2col (FM→A) thay GEMM.
     //   cfg0 = {KW[31:28],KH[27:24],C[23:16],W[15:8],H[7:0]}
     //   cfg1 = {pad[23:20],stride[19:16],Wout[15:8],Hout[7:0]}
     input  wire                          pi_im2col_mode,
     input  wire [31:0]                   pi_im2col_cfg0,
     input  wire [31:0]                   pi_im2col_cfg1,
-    // ── Phase 3a: OS dataflow (FC) ──
+    // ── Luồng dữ liệu Output-Stationary (OS) cho lớp Fully Connected ──
     input  wire                          pi_os_mode,
-    // ── Phase 2b: HW maxpool ──
+    // ── Chế độ Max-Pooling phần cứng ──
     input  wire                          pi_pool_mode,
     output reg                           po_busy,
     output reg                           po_done,
@@ -66,7 +66,7 @@ module control_unit #(
     output reg  [SA_N*DATA_WIDTH-1:0]    po_dp_a_left,
     output reg  [SA_N-1:0]               po_dp_valid_left,
 
-    // ── Phase 3a-merge: OS dual-mode tới data_path ───────────────
+    // ── Điều khiển chế độ Output-Stationary tới data_path ───────────────
     output wire                          po_dp_os_mode,
     output wire                          po_dp_os_init,
     output wire                          po_dp_os_valid,
@@ -86,7 +86,7 @@ module control_unit #(
     input  wire [DATA_WIDTH-1:0]         pi_pp_data_out,
     input  wire                          pi_pp_valid_out,
 
-    // ── Phase 0 instrumentation: per-state cycle counters ──────────
+    // ── Đếm số chu kỳ hoạt động của từng trạng thái (Performance Counters) ──────────
     //   pi_cnt_clear = 1 cycle pulse → reset all counters to 0.
     //   Counters wrap modulo 2^32. Read các po_cnt_* qua AXI-Lite.
     input  wire                          pi_cnt_clear,
@@ -113,31 +113,31 @@ module control_unit #(
     localparam [4:0] ST_POST_PROC    = 5'd6;
     localparam [4:0] ST_SEND_OUT     = 5'd7;
     localparam [4:0] ST_DONE         = 5'd8;
-    // Phase 2a: im2col mode states
+    // Các trạng thái của chế độ im2col
     localparam [4:0] ST_LOAD_FM      = 5'd9;
     localparam [4:0] ST_LOAD_FM_HI   = 5'd10;
     localparam [4:0] ST_IM2COL_RUN   = 5'd11;
     localparam [4:0] ST_SEND_A_R0    = 5'd12;
     localparam [4:0] ST_SEND_A_R1    = 5'd13;
     localparam [4:0] ST_SEND_A_TX    = 5'd14;
-    // Phase 3a: OS dataflow states (FC)
+    // Các trạng thái của chế độ Output-Stationary
     localparam [4:0] ST_OS_LOAD_W    = 5'd15;  // AXIS weight tile → w_os_buf
     localparam [4:0] ST_OS_LOAD_A    = 5'd16;  // AXIS a-vector → a_os_buf
     localparam [4:0] ST_OS_FEED      = 5'd17;  // feed os_array (accumulate)
     localparam [4:0] ST_OS_DRAIN     = 5'd18;  // copy c[n] → psum_buf[0][n]
-    // Phase 2b: HW maxpool state
+    // Trạng thái của chế độ Max-Pooling
     localparam [4:0] ST_POOL_RUN     = 5'd19;  // maxpool đọc FM → ghi pooled u_sp_a
 
     localparam integer WORDS_PER_ROW = SA_N / 2;   // 4 cho SA_N=8
 
     reg [4:0] state;
 
-    // ── Phase 2a/1b: im2col datapath ──
+    // ── Khối truyền nhận dữ liệu im2col ──
     // Blocking: load FM 1 lần; lặp nội bộ từng output-row ho (HO_BLK=1 ho/block),
     // mỗi block im2col sinh Wout hàng A → SEND ra.
-    // 1b-a: TÁCH 2 scratchpad — u_sp_fm (FM, im2col đọc) + u_sp_a (A, im2col ghi /
+    // TÁCH 2 scratchpad — u_sp_fm (FM, im2col đọc) + u_sp_a (A, im2col ghi /
     // SEND đọc). Port riêng → im2col-đọc-FM và SEND-đọc-A chạy đồng thời được
-    // (nền cho double-buffer 1b-b). A-scratchpad 2 bank cho ping-pong sau.
+    // (nền cho double-buffer). A-scratchpad 2 bank cho ping-pong sau.
     localparam integer SP_FM_DEPTH = 1024;         // FM tối đa (Conv2 864)
     localparam integer SP_A_DEPTH  = 2048;         // 1 block A (Conv2 Wout*K=1200)
 
@@ -173,7 +173,7 @@ module control_unit #(
     wire [15:0] sp_fm_rd_data;   // u_sp_fm read → im2col/maxpool
     wire [15:0] sp_a_rd_data;    // u_sp_a read  → SEND
 
-    // maxpool ↔ scratchpad wires (Phase 2b)
+    // maxpool ↔ scratchpad wires
     wire        mp_fm_rd_en;   wire [15:0] mp_fm_rd_addr;
     wire        mp_out_wr_en;  wire [15:0] mp_out_wr_addr;  wire signed [15:0] mp_out_wr_data;
     wire        mp_busy, mp_done;
@@ -236,7 +236,7 @@ module control_unit #(
         .po_a_wr_en(ic_a_wr_en), .po_a_wr_addr(ic_a_wr_addr), .po_a_wr_data(ic_a_wr_data)
     );
 
-    // ── Phase 2b: HW maxpool — đọc FM (u_sp_fm) → ghi pooled (u_sp_a) ──
+    // ── Chế độ Max-Pooling phần cứng — đọc FM (u_sp_fm) → ghi pooled (u_sp_a) ──
     reg mp_start;
     maxpool2x2 #(.DATA_WIDTH(16), .ADDR_WIDTH(16), .DIM_WIDTH(8)) u_maxpool (
         .pi_clk(pi_clk), .pi_rst_n(pi_rst_n), .pi_start(mp_start),
@@ -250,10 +250,17 @@ module control_unit #(
     wire [15:0] pool_total  = ic_C * (ic_H >> 1) * (ic_W >> 1);
     wire [15:0] pool_nwords = (pool_total + 16'd1) >> 1;
 
-    // ── Phase 3a-merge: OS dùng CHUNG data_path array (bỏ os_array) ──
+    // ── Chế độ Output-Stationary dùng chung cấu trúc data_path array ──
     // a-vector → broadcast tới array; reduce cột (po_dp_os_c) làm trong data_path.
     reg  [SA_N*DATA_WIDTH-1:0]      a_os_buf;    // a vector (128-bit)
     reg  [3:0]                      os_row, os_pair;
+    // ── Kiến trúc CISC: tích hợp nhiều K-tile vào một lần gọi (invocation) ──
+    //   os_kt = K-tile hiện tại trong invocation; os_ktiles = tổng K-tile.
+    //   Số K-tile lấy từ IM2COL_CFG0[9:0] (thanh ghi rảnh trong OS mode).
+    //   =0 (firmware/tb cũ không set) → mặc định 1 → giữ nguyên hành vi cũ.
+    reg  [9:0]                      os_kt;
+    wire [9:0] os_ktiles = (pi_im2col_cfg0[9:0] == 10'd0) ? 10'd1
+                                                          : pi_im2col_cfg0[9:0];
 
     // ─────────────────────────────────────────────────────────────
     // Counters
@@ -276,12 +283,12 @@ module control_unit #(
     reg [DATA_WIDTH-1:0]  weight_row_buf [0:SA_N-1];
     reg [DATA_WIDTH-1:0]  bias_buf       [0:SA_N-1];
     reg [DATA_WIDTH-1:0]  input_buf      [0:SA_N-1][0:SA_N-1];
-    // psum_buf[slot][m][n] — NUM_SLOTS output tile (Phase 1a-ii-B blocking)
+    // psum_buf[slot][m][n] — NUM_SLOTS output tile (Hỗ trợ cơ chế blocking)
     reg [ACC_WIDTH-1:0]   psum_buf       [0:NUM_SLOTS-1][0:SA_N-1][0:SA_N-1];
     reg [DATA_WIDTH-1:0]  out_buf        [0:SA_N-1][0:SA_N-1];
 
     // ─────────────────────────────────────────────────────────────
-    // Phase 0 instrumentation: per-state cycle counters
+    // Bộ đếm chu kỳ hiệu năng cho từng trạng thái
     // ─────────────────────────────────────────────────────────────
     reg [31:0] cnt_idle;
     reg [31:0] cnt_load_w;
@@ -360,9 +367,10 @@ module control_unit #(
         end
     end
 
-    // Phase 3a-merge: OS control tới data_path.
+    // Điều khiển chế độ Output-Stationary tới data_path.
     assign po_dp_os_mode  = pi_os_mode;                          // giữ → weight-load preserve psum
-    assign po_dp_os_init  = (state == ST_OS_FEED) && !pi_acc_accum;  // K-tile đầu ghi đè
+    // K-tile đầu ghi đè (os_kt==0 trong CISC; !acc_accum cho đường per-invocation cũ)
+    assign po_dp_os_init  = (state == ST_OS_FEED) && !pi_acc_accum && (os_kt == 10'd0);
     assign po_dp_os_valid = (state == ST_OS_FEED);
 
     // ─────────────────────────────────────────────────────────────
@@ -401,6 +409,7 @@ module control_unit #(
             a_word                <= 12'd0;
             send_lo               <= 16'd0;
             ho_cur                <= 8'd0;
+            os_kt                 <= 10'd0;
         end else begin
             // ── Default deassertions (chỉ pulse khi cần) ──
             po_dp_weight_load <= 1'b0;
@@ -417,16 +426,18 @@ module control_unit #(
                 if (pi_start) begin
                     po_busy <= 1'b1;
                     if (pi_im2col_mode || pi_pool_mode) begin
-                        // Phase 2a/2b: im2col hoặc maxpool — nạp feature map → scratchpad.
+                        // Chế độ im2col hoặc maxpool — nạp feature map → scratchpad.
                         state  <= ST_LOAD_FM;
                         fm_idx <= 16'd0;
                         ho_cur <= 8'd0;
                     end else if (pi_os_mode) begin
-                        // Phase 3a-merge: OS dùng CHUNG array — nạp W tile vào array
+                        // Chế độ Output-Stationary dùng chung array — nạp W tile vào array
                         // qua weight-load WS (psum_reg giữ vì os_mode=1).
+                        // Cơ chế CISC: os_kt=0, lặp os_ktiles K-tile nội bộ.
                         state  <= ST_LOAD_W_RECV;
                         w_row  <= 4'd0;
                         w_pair <= 4'd0;
+                        os_kt  <= 10'd0;
                     end else if (pi_skip_w_load) begin
                         // 1a-ii: giữ weight cũ trong array → bỏ thẳng sang LOAD_BIAS.
                         state     <= ST_LOAD_BIAS;
@@ -466,7 +477,7 @@ module control_unit #(
                 end
             end
 
-            // ─────────── Phase 2b: maxpool chạy (FM→pooled trong scratchpad) ─────
+            // ─────────── Chạy maxpool (đọc FM và ghi pooled vào scratchpad) ─────
             ST_POOL_RUN: begin
                 if (mp_done) begin
                     a_word <= 12'd0;
@@ -513,7 +524,7 @@ module control_unit #(
                 end
             end
 
-            // ─────────── Phase 3a-merge: OS dataflow qua data_path array ────────────
+            // ─────────── Luồng dữ liệu Output-Stationary qua data_path array ────────────
             // W tile đã nạp vào array (LOAD_W). Giờ nạp a-vector → broadcast → array
             // cộng dồn cục bộ → po_dp_os_c (adder tree). KHÔNG còn os_array.
             ST_OS_LOAD_A: begin              // 4 word → a_os_buf[k]
@@ -526,15 +537,25 @@ module control_unit #(
             end
             ST_OS_FEED: begin                // 1 cycle: broadcast a → array MAC cục bộ
                 // po_dp_a_left/os_valid/os_init drive ở khối combinational.
-                if (pi_post_skip) state <= ST_DONE;       // K-tile giữa: chỉ cộng dồn
-                else              state <= ST_OS_DRAIN;    // K-tile cuối: → post_proc
+                // Cơ chế CISC: còn K-tile → nạp W tile tiếp theo trong cùng lần gọi
+                // (psum giữ vì os_mode=1). Hết K-tile → DRAIN (hoặc DONE per-invocation cũ).
+                if (os_kt + 10'd1 < os_ktiles) begin
+                    os_kt  <= os_kt + 10'd1;
+                    w_row  <= 4'd0;
+                    w_pair <= 4'd0;
+                    state  <= ST_LOAD_W_RECV;
+                end else if (pi_post_skip) begin
+                    state <= ST_DONE;                     // K-tile giữa (per-invocation cũ)
+                end else begin
+                    state <= ST_OS_DRAIN;                 // K-tile cuối → post_proc
+                end
             end
             ST_OS_DRAIN: begin               // c[n] = po_dp_os_c → psum_buf[slot][0][n]
                 for (ni = 0; ni < SA_N; ni = ni + 1) begin
                     psum_buf[pi_acc_slot][0][ni[2:0]] <= pi_dp_os_c[ni*ACC_WIDTH +: ACC_WIDTH];
                     bias_buf[ni[2:0]] <= {DATA_WIDTH{1'b0}};
                 end
-                pp_in_m <= 4'd0; pp_in_n <= 4'd0;
+                pp_in_m <= 4'd0; pp_in_n <= 4'd0; pp_in_cnt <= 10'd0;
                 pp_out_m <= 4'd0; pp_out_n <= 4'd0; pp_out_cnt <= 10'd0;
                 state <= ST_POST_PROC;
             end
@@ -621,8 +642,8 @@ module control_unit #(
                     if (pi_dp_valid_bottom[ni] && (ni < pi_tile_n_size)) begin
                         m_capture = cmp_t - ni - SA_N;
                         if (m_capture >= 0 && m_capture < pi_tile_m_size) begin
-                            // Phase 1a-i: cộng dồn (K>0) hoặc ghi đè (K=0).
-                            // Phase 1a-ii-B: vào slot pi_acc_slot (blocking).
+                            // Cộng dồn (K>0) hoặc ghi đè (K=0).
+                            // Ghi vào slot pi_acc_slot tương ứng (blocking).
                             if (pi_acc_accum)
                                 psum_buf[pi_acc_slot][m_capture[2:0]][ni[2:0]] <=
                                     psum_buf[pi_acc_slot][m_capture[2:0]][ni[2:0]] +
@@ -636,7 +657,7 @@ module control_unit #(
 
                 // Transition khi cycle cuối
                 if (cmp_t == (pi_tile_m_size + pi_tile_n_size + (SA_N - 2))) begin
-                    // Phase 1a-i: K-tile giữa (post_skip) chỉ cộng dồn → về DONE,
+                    // Trường hợp K-tile ở giữa (post_skip) chỉ cộng dồn → chuyển tiếp thẳng về DONE,
                     // không POST_PROC/SEND. K-tile cuối (hoặc single) → POST_PROC.
                     if (pi_post_skip) begin
                         state <= ST_DONE;
@@ -656,7 +677,7 @@ module control_unit #(
 
             // ─────────────── POST_PROC - Feed + Capture (3-cycle pipeline) ───
             ST_POST_PROC: begin
-                // ── Feed phase ──
+                // ── Bước nạp dữ liệu (Feed stage) ──
                 if (pp_in_cnt < pi_tile_m_size * pi_tile_n_size) begin
                     po_pp_valid_in <= 1'b1;
                     po_pp_acc_in   <= psum_buf[pi_acc_slot][pp_in_m[2:0]][pp_in_n[2:0]];
@@ -670,7 +691,7 @@ module control_unit #(
                     pp_in_cnt <= pp_in_cnt + 10'd1;
                 end
 
-                // ── Capture phase ──
+                // ── Bước lấy kết quả (Capture stage) ──
                 if (pi_pp_valid_out) begin
                     out_buf[pp_out_m[2:0]][pp_out_n[2:0]] <= pi_pp_data_out;
                     if (pp_out_n == pi_tile_n_size[3:0] - 4'd1) begin
@@ -718,7 +739,7 @@ module control_unit #(
     end
 
     // ─────────────────────────────────────────────────────────────
-    // Phase 0 instrumentation: counter update logic
+    // Cập nhật giá trị bộ đếm hiệu năng
     //   Mỗi cycle increment counter của state hiện tại + cnt_total.
     //   pi_cnt_clear pulse → tất cả counter về 0 (đè reset).
     //   Counter wrap modulo 2^32 nếu không clear.
