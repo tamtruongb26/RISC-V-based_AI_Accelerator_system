@@ -19,9 +19,15 @@
 #include "dma.h"
 #include "mailbox.h"
 #include "io.h"
+#include "accel.h"
 
 /* get_cycles → io.h::pico_rdcycle() (Phase 0 refactor) */
 #define get_cycles pico_rdcycle
+
+/* Phase 5: chạy demo 4-config reliability sau benchmark (=0 để tắt cho đo speed). */
+#define RUN_RELIABILITY_DEMO 1
+#define REL_FAULT_BIT   3u        /* bit lật (tune để thấy hiệu ứng) */
+#define REL_FAULT_TRIG  100000u   /* cycle tiêm (rơi vào Conv1, tune trên board) */
 
 int main(void)
 {
@@ -40,8 +46,22 @@ int main(void)
     mmio_write32(LENET_ADDR(LENET_DDR_HW_CYCLES_OFF), hw_cycles);
 
     if (digit_hw < 0) {
-        /* Error occurred in HW (e.g. timeout), write error code to mailbox */
-        mmio_write32(LENET_ADDR(LENET_DDR_MAILBOX_OFF), (uint32_t)(-digit_hw));
+        /* ── Error debug dump: snapshot HW state vào DDR ──────────── */
+        mmio_write32(LENET_ADDR(LENET_DDR_ERR_CODE_OFF), (uint32_t)digit_hw);
+        mmio_write32(LENET_ADDR(LENET_DDR_ERR_DMA_MM2S_OFF), dma_mm2s_get_status());
+        mmio_write32(LENET_ADDR(LENET_DDR_ERR_DMA_S2MM_OFF), dma_s2mm_get_status());
+        mmio_write32(LENET_ADDR(LENET_DDR_ERR_ACCEL_OFF), accel_get_status());
+        mmio_write32(LENET_ADDR(LENET_DDR_ERR_CFG_OFF), accel_get_cfg());
+
+        /* Map error code → proper mailbox magic value */
+        uint32_t err_mbx;
+        switch (digit_hw) {
+        case -1: err_mbx = RAAS_MBX_DMA_TIMEOUT;   break;
+        case -2: err_mbx = RAAS_MBX_DMA_ERROR;      break;
+        case -3: err_mbx = RAAS_MBX_ACCEL_TIMEOUT;  break;
+        default: err_mbx = RAAS_MBX_FAIL;           break;
+        }
+        mmio_write32(LENET_ADDR(LENET_DDR_MAILBOX_OFF), err_mbx);
     } else {
         /* Step 4: run LeNet-5 inference (SW) */
         uint32_t sw_start = get_cycles();
@@ -54,6 +74,14 @@ int main(void)
 
         /* Write predicted digit to DDR (use HW result) */
         mmio_write32(LENET_ADDR(LENET_DDR_PREDICTED_OFF), (uint32_t)digit_hw);
+
+        /* Write SW predicted digit to DDR */
+        mmio_write32(LENET_ADDR(LENET_DDR_PREDICTED_SW_OFF), (uint32_t)digit_sw);
+
+#if RUN_RELIABILITY_DEMO
+        /* Phase 5: demo 4-config reliability (ghi REL fields trước khi báo PASS) */
+        reliability_demo(REL_FAULT_BIT, REL_FAULT_TRIG);
+#endif
 
         /* Step 5: signal PS that inference is done */
         mmio_write32(LENET_ADDR(LENET_DDR_MAILBOX_OFF), RAAS_MBX_PASS);

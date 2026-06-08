@@ -20,4 +20,9 @@
  */
 int lenet5_infer(int use_hw);
 
+/* Phase 5: demo 4-config reliability (golden / no-harden / ECC / TMR).
+ * Tiêm lỗi tại fault_bit @ fault_trig (cycle từ clear) → chạy LeNet mỗi config,
+ * ghi predicted + counter vào DDR REL fields. Tune (bit,trig) để hit Conv read. */
+void reliability_demo(uint32_t fault_bit, uint32_t fault_trig);
+
 #endif /* LENET_H */

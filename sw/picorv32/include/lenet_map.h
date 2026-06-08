@@ -142,6 +142,15 @@
 #define LENET_DDR_ERR_TILE_K0_OFF 0x00040094u  /* 4B: k0 index when error */
 #define LENET_DDR_ERR_CFG_OFF     0x00040098u  /* 4B: CFG value written to accel */
 
+/* --- Phase 5: reliability demo (4-config fault injection) — 6 × 4B --- */
+#define LENET_DDR_REL_OFF          0x000400A0u
+#define LENET_DDR_REL_GOLDEN_OFF   (LENET_DDR_REL_OFF + 0x00u) /* predicted không lỗi */
+#define LENET_DDR_REL_NOHARDEN_OFF (LENET_DDR_REL_OFF + 0x04u) /* lỗi mem, ECC bypass */
+#define LENET_DDR_REL_ECC_OFF      (LENET_DDR_REL_OFF + 0x08u) /* lỗi mem, ECC sửa */
+#define LENET_DDR_REL_ECC_CNT_OFF  (LENET_DDR_REL_OFF + 0x0Cu) /* ECC corrected count */
+#define LENET_DDR_REL_TMR_OFF      (LENET_DDR_REL_OFF + 0x10u) /* lỗi FSM, TMR vote */
+#define LENET_DDR_REL_TMR_CNT_OFF  (LENET_DDR_REL_OFF + 0x14u) /* TMR mismatch count */
+
 /* --- HW Debug Dump Offsets (Pico writes during HW run, PS reads to compare) --- */
 #define LENET_DDR_HW_DEBUG_BASE    0x00100000u
 #define LENET_DDR_HW_CONV1_OFF     (LENET_DDR_HW_DEBUG_BASE + 0x0000u)

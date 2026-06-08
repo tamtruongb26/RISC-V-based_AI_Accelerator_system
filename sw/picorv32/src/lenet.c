@@ -309,3 +309,45 @@ int lenet5_infer(int use_hw)
 
     return predicted;
 }
+
+/* ── Phase 5: demo 4-config reliability ────────────────────────────────────
+ * Chạy LeNet (HW) dưới 4 kịch bản, ghi predicted + counter vào DDR:
+ *   0 golden    : không tiêm lỗi → đáp án chuẩn.
+ *   1 no-harden : tiêm lỗi codeword bộ nhớ (u_sp_fm), ECC BYPASS → có thể SAI.
+ *   2 ECC       : CÙNG lỗi, ECC sửa → ĐÚNG + ecc_corrected.
+ *   3 TMR       : tiêm lỗi 1 bản FSM state, voter che → ĐÚNG + tmr_mismatch.
+ * (bit,trig) tune để lỗi rơi vào lúc accelerator đọc scratchpad / chuyển state. */
+void reliability_demo(uint32_t fault_bit, uint32_t fault_trig)
+{
+    uint32_t base = LENET_ADDR(LENET_DDR_REL_OFF);
+    accel_counters_t c;
+
+    /* 0. Golden — tắt FI */
+    accel_fault_config(0, 0, 0, 0, 0);
+    int pg = lenet5_infer(1);
+    mmio_write32(base + 0x00u, (uint32_t)pg);
+
+    /* 1. No-harden: lỗi bộ nhớ, ECC bypass */
+    accel_counters_clear();
+    accel_fault_config(fault_bit, fault_trig, /*bypass=*/1, RAAS_FI_TARGET_ECC, 1);
+    int p1 = lenet5_infer(1);
+    mmio_write32(base + 0x04u, (uint32_t)p1);
+
+    /* 2. ECC: cùng lỗi, ECC sửa */
+    accel_counters_clear();
+    accel_fault_config(fault_bit, fault_trig, /*bypass=*/0, RAAS_FI_TARGET_ECC, 1);
+    int p2 = lenet5_infer(1);
+    accel_counters_snapshot(&c);
+    mmio_write32(base + 0x08u, (uint32_t)p2);
+    mmio_write32(base + 0x0Cu, c.ecc_corrected);
+
+    /* 3. TMR: lỗi 1 bản FSM state (bit 0..4), voter che */
+    accel_counters_clear();
+    accel_fault_config(fault_bit & 0x4u, fault_trig, 0, RAAS_FI_TARGET_FSM, 1);
+    int p3 = lenet5_infer(1);
+    accel_counters_snapshot(&c);
+    mmio_write32(base + 0x10u, (uint32_t)p3);
+    mmio_write32(base + 0x14u, c.tmr_mismatch);
+
+    accel_fault_config(0, 0, 0, 0, 0);   /* tắt FI */
+}

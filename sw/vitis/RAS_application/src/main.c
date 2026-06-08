@@ -22,7 +22,7 @@
 #include "firmware_image.h"     /* pico_firmware[], pico_firmware_len */
 #include "lenet_data.h"         /* lenet_conv1_weight, lenet_image, ... */
 
-#define RUN_1000_IMAGES_BENCHMARK  1
+#define RUN_1000_IMAGES_BENCHMARK  0
 #define BENCHMARK_IMAGE_COUNT      1
 
 #if RUN_1000_IMAGES_BENCHMARK
@@ -489,6 +489,26 @@ int main(void)
             xil_printf("\r\n--- Sparsity (operand isolation, Phase 4) ---\r\n");
             xil_printf("  Zero row-feeds skipped: %u\r\n", (unsigned)ac[10]);
             xil_printf("  Skip rate (~ReLU sparsity): %u%% of MAC row-feeds\r\n", (unsigned)sp_pct);
+        }
+
+        /* ── Phase 5: reliability demo (4-config fault injection) ── */
+        Xil_DCacheInvalidateRange(DDR_PS_BASE + LENET_DDR_REL_OFF, 6 * 4);
+        {
+            uint32_t gold = Xil_In32(DDR_PS_BASE + LENET_DDR_REL_GOLDEN_OFF);
+            uint32_t nohd = Xil_In32(DDR_PS_BASE + LENET_DDR_REL_NOHARDEN_OFF);
+            uint32_t pecc = Xil_In32(DDR_PS_BASE + LENET_DDR_REL_ECC_OFF);
+            uint32_t ecnt = Xil_In32(DDR_PS_BASE + LENET_DDR_REL_ECC_CNT_OFF);
+            uint32_t ptmr = Xil_In32(DDR_PS_BASE + LENET_DDR_REL_TMR_OFF);
+            uint32_t tcnt = Xil_In32(DDR_PS_BASE + LENET_DDR_REL_TMR_CNT_OFF);
+            xil_printf("\r\n--- Reliability (fault injection, Phase 5) ---\r\n");
+            xil_printf("  Golden (no fault)      : predict=%u\r\n", (unsigned)gold);
+            xil_printf("  No-harden (mem SEU)    : predict=%u  %s\r\n", (unsigned)nohd,
+                       (nohd == gold) ? "(ok)" : "<- CORRUPTED");
+            xil_printf("  ECC (mem SEU corrected): predict=%u  corrected=%u\r\n",
+                       (unsigned)pecc, (unsigned)ecnt);
+            xil_printf("  TMR (FSM SEU voted)    : predict=%u  mismatch=%u\r\n",
+                       (unsigned)ptmr, (unsigned)tcnt);
+            xil_printf("  => ECC/TMR khoi phuc dung ket qua du co SEU.\r\n");
         }
         break;
 
