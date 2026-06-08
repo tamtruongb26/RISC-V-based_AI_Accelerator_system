@@ -57,6 +57,12 @@ void accel_start_im2col(void);
 void accel_gemm_auto_start(uint32_t tiles, uint32_t in_base,
                            uint32_t out_base, uint32_t act_mode);
 
+/* Phase 5: cấu hình fault injection (gói vào reg7). bit_pos 0..21 (codeword 22-bit),
+ * trigger = cycle (từ clear) sẽ lật, ecc_bypass=1 → no-harden, enable=1 → bật.
+ * Gọi accel_counters_clear() trước để reset cyc + ECC counter. */
+void accel_fault_config(uint32_t bit_pos, uint32_t trigger,
+                        uint32_t ecc_bypass, uint32_t enable);
+
 /* Phase 2b: start chế độ HW maxpool. cfg0 = (C<<16)|(W<<8)|H. */
 void accel_start_pool(uint32_t cfg0);
 
@@ -70,6 +76,9 @@ int accel_wait_done(uint32_t timeout_cycles);
 
 /* Đọc STATUS register raw (debug). */
 uint32_t accel_get_status(void);
+
+/* Đọc CONFIG_PACKED register raw (debug). */
+uint32_t accel_get_cfg(void);
 
 /* ── Phase 0 instrumentation: per-state cycle counters ─────────────────── */
 
@@ -95,7 +104,9 @@ typedef struct {
     uint32_t done;
     uint32_t total;
     uint32_t pe_active;
-    uint32_t sparsity_skip;   /* Phase 4: row-feed thưa (valid && a==0) */
+    uint32_t sparsity_skip;    /* Phase 4: row-feed thưa (valid && a==0) */
+    uint32_t ecc_corrected;    /* Phase 5: ECC sửa 1-bit */
+    uint32_t ecc_uncorr;       /* Phase 5: ECC phát hiện 2-bit (không sửa) */
 } accel_counters_t;
 
 void accel_counters_snapshot(accel_counters_t *out);

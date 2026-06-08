@@ -107,6 +107,11 @@ uint32_t accel_get_status(void)
     return accel_read(RAAS_ACCEL_STATUS);
 }
 
+uint32_t accel_get_cfg(void)
+{
+    return accel_read(RAAS_ACCEL_CFG);
+}
+
 /* ── Counter readback ──────────────────────────────────────────────────── */
 
 void accel_counters_clear(void)
@@ -136,4 +141,15 @@ void accel_counters_snapshot(accel_counters_t *out)
     out->total     = accel_counter_read(RAAS_CNT_IDX_TOTAL);
     out->pe_active = accel_counter_read(RAAS_CNT_IDX_PE_ACTIVE);
     out->sparsity_skip = accel_counter_read(RAAS_CNT_IDX_SPARSITY);
+    out->ecc_corrected = accel_counter_read(RAAS_CNT_IDX_ECC_CORRECTED);
+    out->ecc_uncorr    = accel_counter_read(RAAS_CNT_IDX_ECC_UNCORR);
+}
+
+/* Phase 5: cấu hình fault injection (gói toàn bộ vào reg7 = DESC_OUT_BASE). */
+void accel_fault_config(uint32_t bit_pos, uint32_t trigger,
+                        uint32_t ecc_bypass, uint32_t enable)
+{
+    accel_write(RAAS_ACCEL_DESC_OUT_BASE,
+                RAAS_FI_PACK(bit_pos, ecc_bypass, enable, trigger));
+    fence_iorw();
 }

@@ -124,7 +124,18 @@
 #define RAAS_CNT_IDX_TOTAL       8u
 #define RAAS_CNT_IDX_PE_ACTIVE   9u
 #define RAAS_CNT_IDX_SPARSITY    10u   /* Phase 4: row-feed thưa (valid && a==0) */
-#define RAAS_CNT_COUNT           11u
+#define RAAS_CNT_IDX_ECC_CORRECTED 11u /* Phase 5: ECC sửa được (1-bit)         */
+#define RAAS_CNT_IDX_ECC_UNCORR    12u /* Phase 5: ECC không sửa được (2-bit)   */
+#define RAAS_CNT_COUNT           13u
+
+/* Phase 5: fault injection control — GÓI vào reg7 (RAAS_ACCEL_DESC_OUT_BASE).
+ *   [31:27]=bit_pos, [26]=ecc_bypass, [25]=fi_enable, [24:0]=trigger_cycle.
+ *   Persistent (CFG per-op không ghi đè). fi_clear tái dùng RAAS_CNT_CLEAR. */
+#define RAAS_FI_PACK(bit, bypass, en, trig) \
+    ((((uint32_t)(bit)    & 0x1Fu) << 27) | \
+     (((uint32_t)(bypass) & 0x1u)  << 26) | \
+     (((uint32_t)(en)     & 0x1u)  << 25) | \
+      ((uint32_t)(trig)   & 0x01FFFFFFu))
 
 /* ============================================================================
  * AXI DMA register offsets (Xilinx PG021 standard, Simple Mode)
