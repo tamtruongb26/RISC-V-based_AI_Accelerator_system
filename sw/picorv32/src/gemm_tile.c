@@ -36,6 +36,10 @@
 /* DMA/accel timeout */
 #define TILE_DMA_TIMEOUT    200000u
 #define TILE_ACCEL_TIMEOUT  500000u
+/* OS mode streams up to 32 k-tiles × 144B = 4608B per N-tile;
+ * give DMA 10× more budget than normal tile. */
+#define OS_DMA_TIMEOUT      2000000u
+#define OS_ACCEL_TIMEOUT    5000000u
 
 /* ── Helper: read/write Q1.4.11 element from DDR ────────────────────────
  * DDR stores packed 2×u16 per u32 word. We need byte-level access.
@@ -243,16 +247,25 @@ int gemm_os(uint32_t a_addr, uint32_t w_addr, uint32_t c_addr,
         mmio_write32(LENET_ADDR(LENET_DDR_ERR_TILE_N0_OFF), n0);
         mmio_write32(LENET_ADDR(LENET_DDR_ERR_TILE_K0_OFF), k_tiles);
 
-        accel_im2col_config(k_tiles, 0u);   /* IM2COL_CFG0 = số K-tile (OS reuse) */
+        /* BUG FIX: dma_reset() TRƯỚC accel_im2col_config() để đảm bảo
+         * IM2COL_CFG0 (os_ktiles) không bị overwrite bởi pool_hw stale state.
+         * Thứ tự đúng: reset → config os_ktiles → start accel → arm DMA. */
         dma_reset();
+        accel_im2col_config(k_tiles, 0u);   /* IM2COL_CFG0 = số K-tile (OS reuse) */
+        /* DIAG (tạm): đọc lại IM2COL_CFG0 → ghi vào field dump "n0".
+         * Khi lỗi, PS in "Tile n0=X": X=k_tiles(32)→register OK (HW logic stale,
+         * cần re-synth IP); X=0→write không tới reg5 (vấn đề khác). */
+        mmio_write32(LENET_ADDR(LENET_DDR_ERR_TILE_N0_OFF),
+                     mmio_read32(RAAS_PICO_ACCEL_BASE + RAAS_ACCEL_IM2COL_CFG0));
         accel_configure_and_start_flags(1u, SA, SA, act_mode, RAAS_CFG_OS_MODE);
         dma_s2mm_recv(tile_out, SA * 2u);    /* M=1×N=8 → 4 word */
 
-        rc = dma_mm2s_send_and_wait(stream, stream_bytes, TILE_DMA_TIMEOUT);
+        /* OS mode gửi k_tiles × 144B (tối đa 4608B cho FC1) → dùng OS_DMA_TIMEOUT */
+        rc = dma_mm2s_send_and_wait(stream, stream_bytes, OS_DMA_TIMEOUT);
         if (rc < 0) return rc;
-        rc = accel_wait_done(TILE_ACCEL_TIMEOUT);
+        rc = accel_wait_done(OS_ACCEL_TIMEOUT);
         if (rc < 0) return rc;
-        rc = dma_s2mm_wait(TILE_DMA_TIMEOUT);
+        rc = dma_s2mm_wait(OS_DMA_TIMEOUT);
         if (rc < 0) return rc;
 
         for (uint32_t c = 0; c < n_size; c++)

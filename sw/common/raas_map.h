@@ -199,6 +199,7 @@
 #define RAAS_MBX_DMA_TIMEOUT      0xDEAD0001u  /* DMA hang                */
 #define RAAS_MBX_ACCEL_TIMEOUT    0xDEAD0002u  /* accelerator hang        */
 #define RAAS_MBX_DMA_ERROR        0xDEAD0003u  /* DMASR error bit set     */
+#define RAAS_MBX_GO               0x600D600Du  /* PS → FW: ảnh sẵn, chạy đi (no-reboot loop) */
 
 /* ============================================================================
  * Tile config (Stage A: hardcoded 8×8×8 bypass)
