@@ -56,7 +56,7 @@ SMOKE_BIN    := $(BUILD)/firmware.bin
 SMOKE_MAP    := $(BUILD)/firmware.map
 SMOKE_LST    := $(BUILD)/firmware.lst
 SMOKE_HDR    := $(BUILD)/firmware_image.h
-PS_SMOKE_HDR := ../vitis/RAS_application/src/firmware_image.h
+PS_SMOKE_HDR := ../vitis/app_component/src/firmware_image.h
 
 # ── LeNet-5 target ───────────────────────────────────────────────────
 LENET_MAIN   := src/main_lenet.c
@@ -141,6 +141,10 @@ install_lenet_hdr: $(LENET_HDR)
 	@if [ -d $(dir $(PS_LENET_HDR)) ]; then \
 		cp $(LENET_HDR) $(PS_LENET_HDR); \
 		echo "Copied $(LENET_HDR) → $(PS_LENET_HDR)"; \
+	fi
+	@if [ -d $(dir $(PS_SMOKE_HDR)) ]; then \
+		cp $(LENET_HDR) $(PS_SMOKE_HDR); \
+		echo "Copied $(LENET_HDR) → $(PS_SMOKE_HDR)"; \
 	fi
 
 size_lenet: $(LENET_ELF)

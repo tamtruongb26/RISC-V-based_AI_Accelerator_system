@@ -580,6 +580,70 @@ module accelerator_top_tb;
         errs = errs + local_errs;
     endtask
 
+    // Phase 3b CISC: OS gom nhiều K-tile vào 1 invocation (1 START, 1 stream).
+    // K=16 → 2 K-tile trong 1 lần; IM2COL_CFG0=2. Kết quả phải == WS K-accum.
+    task automatic run_os_cisc_check();
+        integer k, n, t, i, nw, local_errs;
+        reg [15:0] Wf [0:127];   // W[16][8]
+        reg [15:0] Af [0:15];    // a[16]
+        reg [31:0] out_ref [0:7];
+        reg [31:0] cfg;
+
+        for (i = 0; i < 8; i = i + 1) bias_mem[i] = 16'h0;
+        for (k = 0; k < 16; k = k + 1) Af[k] = 16'h0040 + k*16'h0002;
+        for (k = 0; k < 16; k = k + 1)
+            for (n = 0; n < 8; n = n + 1)
+                Wf[k*8 + n] = 16'h0020 + k*16'h0004 + n;
+        nw  = (8 + 1) >> 1;        // M=1 × ⌈N/2⌉ = 4 word
+        cfg = (1 & 32'hF) | ((8 & 32'hF) << 4) | ((8 & 32'hF) << 8);
+
+        // ── Reference: WS K-accum (2 tile, per-invocation) ──
+        reset_dut();
+        @(negedge clk); capture_enable = 1'b0; capture_reset = 1'b1;
+        @(posedge clk); @(negedge clk); capture_reset = 1'b0; capture_enable = 1'b1;
+        for (t = 0; t < 2; t = t + 1) begin
+            for (k = 0; k < 8; k = k + 1) begin
+                A_mem[k] = Af[t*8 + k];
+                for (n = 0; n < 8; n = n + 1) W_mem[k*8 + n] = Wf[(t*8 + k)*8 + n];
+            end
+            axi_lite_write(5'h00, cfg | (32'h1<<14) | (t==0 ? (32'h1<<16) : (32'h1<<15)));
+            push_tile(1, 8);
+            wait_done("os_cisc.ws");
+        end
+        @(posedge clk); capture_enable = 1'b0;
+        for (i = 0; i < nw; i = i + 1) out_ref[i] = capture_buf[i];
+
+        // ── OS CISC: 1 invocation, IM2COL_CFG0=2 K-tile, 1 stream [W0 a0 W1 a1] ──
+        reset_dut();
+        @(negedge clk); capture_enable = 1'b0; capture_reset = 1'b1;
+        @(posedge clk); @(negedge clk); capture_reset = 1'b0; capture_enable = 1'b1;
+        axi_lite_write(5'h14, 32'd2);                               // IM2COL_CFG0 (byte 0x14) = K_TILES
+        axi_lite_write(5'h00, cfg | (32'h1<<14) | (32'h1<<22));     // START | OS_MODE
+        for (t = 0; t < 2; t = t + 1) begin
+            for (k = 0; k < 8; k = k + 1) begin
+                A_mem[k] = Af[t*8 + k];
+                for (n = 0; n < 8; n = n + 1) W_mem[k*8 + n] = Wf[(t*8 + k)*8 + n];
+            end
+            push_os_tile();      // axis_push block theo tready → FSM tự lặp K-tile
+        end
+        wait_done("os_cisc.os");
+        @(posedge clk); capture_enable = 1'b0;
+
+        local_errs = 0;
+        if (capture_count !== nw) begin
+            $display("[FAIL] os_cisc: captured %0d != %0d", capture_count, nw);
+            local_errs = local_errs + 1;
+        end
+        for (i = 0; i < nw; i = i + 1)
+            if (out_ref[i] !== capture_buf[i]) begin
+                $display("[FAIL] os_cisc word %0d: WS=0x%h OS=0x%h", i, out_ref[i], capture_buf[i]);
+                local_errs = local_errs + 1;
+            end
+        if (local_errs == 0)
+            $display("[ OK ] OS CISC 2-K-tile (1 invocation) == WS K-accum (%0d words)", nw);
+        errs = errs + local_errs;
+    endtask
+
     task automatic push_bias_input(input integer M, input integer K);
         integer p, m, Kp;
         reg [15:0] lo, hi;
@@ -1153,6 +1217,8 @@ module accelerator_top_tb;
         run_os_check();
         reset_dut();
         run_os_ktile_check();
+        reset_dut();
+        run_os_cisc_check();
 
         // Phase 2b: HW maxpool integration
         reset_dut();

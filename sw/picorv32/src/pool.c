@@ -78,19 +78,27 @@ void maxpool2x2(uint32_t in_addr, uint32_t out_addr,
  * nhận [C×H/2×W/2]. Cùng signature maxpool2x2 (SW). */
 int pool_hw(uint32_t in_addr, uint32_t out_addr, uint32_t C, uint32_t H, uint32_t W)
 {
-    uint32_t fm_bytes  = C * H * W * 2u;
-    uint32_t out_bytes = C * (H / 2u) * (W / 2u) * 2u;
-    uint32_t cfg0 = (C << 16) | (W << 8) | H;
+    /* BUG FIX: scratchpad u_sp_fm chỉ chứa SP_FM_DEPTH=1024 phần tử, nhưng
+     * Pool1 FM = 6×24×24 = 3456 > 1024 → tràn → maxpool đọc rác.
+     * Pool 2×2 ĐỘC LẬP theo kênh → xử lý TỪNG KÊNH (H×W ≤ 1024 luôn vừa:
+     * Pool1 576, Pool2 64). Layout CHW giữ nguyên (kênh c → offset riêng). */
+    uint32_t in_ch_bytes  = H * W * 2u;
+    uint32_t out_ch_bytes = (H / 2u) * (W / 2u) * 2u;
+    uint32_t cfg0 = (1u << 16) | (W << 8) | H;       /* C=1 mỗi lần */
     int rc;
 
-    dma_reset();
-    accel_start_pool(cfg0);                  /* → LOAD_FM, chờ AXIS */
-    dma_s2mm_recv(out_addr, out_bytes);      /* arm nhận pooled */
+    for (uint32_t c = 0; c < C; c++) {
+        dma_reset();
+        accel_start_pool(cfg0);                       /* → LOAD_FM, chờ AXIS */
+        dma_s2mm_recv(out_addr + c * out_ch_bytes, out_ch_bytes);
 
-    rc = dma_mm2s_send_and_wait(in_addr, fm_bytes, POOL_DMA_TIMEOUT);
-    if (rc < 0) return rc;
-    rc = accel_wait_done(POOL_ACCEL_TIMEOUT);
-    if (rc < 0) return rc;
-    rc = dma_s2mm_wait(POOL_DMA_TIMEOUT);
-    return rc;
+        rc = dma_mm2s_send_and_wait(in_addr + c * in_ch_bytes, in_ch_bytes,
+                                    POOL_DMA_TIMEOUT);
+        if (rc < 0) return rc;
+        rc = accel_wait_done(POOL_ACCEL_TIMEOUT);
+        if (rc < 0) return rc;
+        rc = dma_s2mm_wait(POOL_DMA_TIMEOUT);
+        if (rc < 0) return rc;
+    }
+    return 0;
 }

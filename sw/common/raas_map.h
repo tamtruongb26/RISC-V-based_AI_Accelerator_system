@@ -37,8 +37,17 @@
 #define RAAS_ACCEL_CNT_SEL       0x08u   /* R/W  [3:0]=counter index        */
 #define RAAS_ACCEL_STATUS        0x0Cu   /* R    [0]=BUSY, [1]=DONE         */
 #define RAAS_ACCEL_CNT_VAL       0x10u   /* R    32-bit counter[CNT_SEL]    */
-#define RAAS_ACCEL_IM2COL_CFG0   0x14u   /* R/W  {KW,KH,C,W,H} packed       */
-#define RAAS_ACCEL_IM2COL_CFG1   0x18u   /* R/W  {pad,stride,Wout,Hout}     */
+#define RAAS_ACCEL_IM2COL_CFG0   0x14u   /* R/W  {KW,KH,C,W,H} / auto:{n,m,k}*/
+#define RAAS_ACCEL_IM2COL_CFG1   0x18u   /* R/W  {pad,stride,Wout,Hout}/auto:in_base */
+#define RAAS_ACCEL_DESC_OUT_BASE 0x1Cu   /* R/W  Phase 2c: out_base (auto)   */
+
+/* Phase 2c autonomy: CFG[24]=AUTO_GO (1-shot) — accelerator tự chạy GEMM.
+ *   IM2COL_CFG0 = (n_tiles<<20)|(m_tiles<<10)|k_tiles ; CFG1 = in_base (stage)
+ *   DESC_OUT_BASE = out_base ; CFG[13:12] = act. Pico poll STATUS.DONE. */
+#define RAAS_CFG_AUTO_GO         (1u << 24)
+#define RAAS_DESC_TILES(n, m, k) ((((uint32_t)(n) & 0x3FFu) << 20) | \
+                                  (((uint32_t)(m) & 0x3FFu) << 10) | \
+                                   ((uint32_t)(k) & 0x3FFu))
 
 /* CONFIG_PACKED bit fields:
  *   [3:0]   = M_size  (1..8)
@@ -114,7 +123,24 @@
 #define RAAS_CNT_IDX_DONE        7u
 #define RAAS_CNT_IDX_TOTAL       8u
 #define RAAS_CNT_IDX_PE_ACTIVE   9u
-#define RAAS_CNT_COUNT           10u
+#define RAAS_CNT_IDX_SPARSITY    10u   /* Phase 4: row-feed thưa (valid && a==0) */
+#define RAAS_CNT_IDX_ECC_CORRECTED 11u /* Phase 5: ECC sửa được (1-bit)         */
+#define RAAS_CNT_IDX_ECC_UNCORR    12u /* Phase 5: ECC không sửa được (2-bit)   */
+#define RAAS_CNT_IDX_TMR_MISMATCH  13u /* Phase 5b: TMR FSM vote mismatch        */
+#define RAAS_CNT_COUNT           14u
+
+/* Phase 5: fault injection control — GÓI vào reg7 (RAAS_ACCEL_DESC_OUT_BASE).
+ *   [31:27]=bit_pos, [26]=ecc_bypass, [25]=fi_enable, [24]=fi_target
+ *   (0=ECC scratchpad, 1=FSM state), [23:0]=trigger_cycle.
+ *   Persistent (CFG per-op không ghi đè). fi_clear tái dùng RAAS_CNT_CLEAR. */
+#define RAAS_FI_TARGET_ECC  0u
+#define RAAS_FI_TARGET_FSM  1u
+#define RAAS_FI_PACK(bit, bypass, en, target, trig) \
+    ((((uint32_t)(bit)    & 0x1Fu) << 27) | \
+     (((uint32_t)(bypass) & 0x1u)  << 26) | \
+     (((uint32_t)(en)     & 0x1u)  << 25) | \
+     (((uint32_t)(target) & 0x1u)  << 24) | \
+      ((uint32_t)(trig)   & 0x00FFFFFFu))
 
 /* ============================================================================
  * AXI DMA register offsets (Xilinx PG021 standard, Simple Mode)
@@ -173,6 +199,7 @@
 #define RAAS_MBX_DMA_TIMEOUT      0xDEAD0001u  /* DMA hang                */
 #define RAAS_MBX_ACCEL_TIMEOUT    0xDEAD0002u  /* accelerator hang        */
 #define RAAS_MBX_DMA_ERROR        0xDEAD0003u  /* DMASR error bit set     */
+#define RAAS_MBX_GO               0x600D600Du  /* PS → FW: ảnh sẵn, chạy đi (no-reboot loop) */
 
 /* ============================================================================
  * Tile config (Stage A: hardcoded 8×8×8 bypass)

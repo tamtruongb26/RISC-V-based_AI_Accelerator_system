@@ -1,7 +1,7 @@
 `timescale 1ns / 1ps
 
 // ===========================================================================
-// maxpool2x2.v — Hardware max-pool 2×2 stride 2 (Phase 2b, Vấn đề 3c)
+// maxpool2x2.v — Hardware max-pool 2×2 stride 2 (giải Vấn đề 3c)
 //
 // Bỏ maxpool SW. Đọc feature map [C×H×W] (CHW) từ memory, mỗi output = max của
 // khối 2×2 → ghi [C × H/2 × W/2]. FSM address-based (như im2col): mỗi output đọc

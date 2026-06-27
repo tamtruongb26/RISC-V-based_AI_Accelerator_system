@@ -1,7 +1,7 @@
 `timescale 1ns / 1ps
 
 // ===========================================================================
-// im2col.v — Hardware im2col (Phase 2a, giải Vấn đề 3b)
+// im2col.v — Bộ chuyển đổi im2col bằng phần cứng (giải Vấn đề 3b)
 //
 // Biến feature map [H×W×C] (CHW) thành ma trận GEMM A[M×K]:
 //   M = H_out × W_out   (số vị trí output)
@@ -10,7 +10,7 @@
 // FSM sliding-window: với mỗi (h_out,w_out) → 1 hàng A; trong hàng, duyệt
 // (c, kh, kw) → các cột. Pixel ngoài biên (padding) ghi 0.
 //
-// 2 phase/phần tử: READ (issue fm read) → WRITE (ghi A). FM read 1-cycle latency.
+// 2 bước/phần tử: READ (issue fm read) → WRITE (ghi A). FM read 1-cycle latency.
 // Địa chỉ ghi A là LINEAR (row-major, ++mỗi phần tử) → không cần nhân.
 // Địa chỉ đọc FM = c*H*W + h_in*W + w_in (CHW).
 //

@@ -1,7 +1,7 @@
 `timescale 1ns / 1ps
 
 // ===========================================================================
-// fault_injector.v — SEU fault injection point (Phase 5a, trụ Reliability)
+// fault_injector.v — Điểm tiêm lỗi SEU (thuộc cơ chế tăng cường độ tin cậy Reliability)
 //
 // Một điểm tiêm lỗi: XOR 1 bit của data tại 1 cycle định trước → mô phỏng
 // Single Event Upset (bit flip). Đặt TRƯỚC 1 register → register latch giá trị

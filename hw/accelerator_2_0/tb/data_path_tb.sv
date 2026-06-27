@@ -42,6 +42,9 @@ module data_path_tb;
     always #(CLK_PERIOD/2) clk = ~clk;
 
     // -------- DUT instance --------
+    reg os_mode = 1'b0, os_init = 1'b0, os_valid = 1'b0;
+    wire [SA_N*AW-1:0] os_c;
+
     data_path #(.SA_N(SA_N), .DATA_WIDTH(DW), .ACC_WIDTH(AW)) dut (
         .pi_clk             (clk),
         .pi_rst_n           (rst_n),
@@ -51,7 +54,11 @@ module data_path_tb;
         .pi_a_left          (a_left),
         .pi_valid_left      (valid_left),
         .po_psum_bottom     (psum_bottom),
-        .po_valid_bottom    (valid_bottom)
+        .po_valid_bottom    (valid_bottom),
+        .pi_os_mode         (os_mode),
+        .pi_os_init         (os_init),
+        .pi_os_valid        (os_valid),
+        .po_os_c            (os_c)
     );
 
     // -------- Test data buffers (loaded từ hex files) --------
@@ -190,6 +197,52 @@ module data_path_tb;
         compare_results(name, M_used, N_used);
     endtask
 
+    // -------- Phase 3a-merge: OS qua array == Σ a·w (verify dual-mode PE) --------
+    task automatic run_os_check(input string tag, input integer ntile);
+        integer r, c, k, n, t, le;
+        reg [SA_N*DW-1:0] row_pack, a_pack;
+        reg signed [AW-1:0] gold [0:SA_N-1];
+        reg signed [AW-1:0] got, exp;
+        // golden reset
+        for (n = 0; n < SA_N; n = n + 1) gold[n] = '0;
+        os_mode = 1'b0; os_init = 1'b0; os_valid = 1'b0;
+
+        for (t = 0; t < ntile; t = t + 1) begin
+            // data K-tile t (signed, distinct)
+            for (r = 0; r < SA_N; r = r + 1)
+                for (c = 0; c < SA_N; c = c + 1)
+                    W_q[r*SA_N + c] = (t*4 + r*3 + c) % 17 - 8;
+            for (k = 0; k < SA_N; k = k + 1)
+                A_q[k] = (t*7 + k*5) % 13 - 6;
+            for (n = 0; n < SA_N; n = n + 1)
+                for (k = 0; k < SA_N; k = k + 1)
+                    gold[n] = gold[n] + $signed(A_q[k]) * $signed(W_q[k*SA_N + n]);
+
+            // load W tile vào array (os_mode=0 ở tile đầu để clear; giữ ở tile sau)
+            os_mode = (t != 0);
+            load_weights();
+            // compute 1 K-tile: broadcast a, os_init chỉ tile đầu
+            os_mode = 1'b1;
+            a_pack = '0;
+            for (k = 0; k < SA_N; k = k + 1) a_pack[k*DW +: DW] = A_q[k];
+            @(negedge clk); a_left = a_pack; os_valid = 1'b1; os_init = (t == 0);
+            @(negedge clk); os_valid = 1'b0; os_init = 1'b0; a_left = '0;
+            @(negedge clk);
+        end
+        #1;
+        le = 0;
+        for (n = 0; n < SA_N; n = n + 1) begin
+            got = os_c[n*AW +: AW]; exp = gold[n];
+            if (got !== exp) begin
+                if (le < 4) $display("[FAIL] %s os_c[%0d]: got=%0d exp=%0d", tag, n, $signed(got), $signed(exp));
+                le = le + 1;
+            end
+        end
+        if (le == 0) $display("[ OK ] %s OS-via-array == Σ a·w (%0d K-tile, 8 col)", tag, ntile);
+        errs = errs + le;
+        os_mode = 1'b0;
+    endtask
+
     // -------- Main stimulus --------
     initial begin
         $dumpfile("data_path_tb.vcd");
@@ -219,6 +272,10 @@ module data_path_tb;
         // KHÔNG reset DUT giữa 2 tile — verify weight_load tự clear pipeline.
         run_tile("case3a", 8, 8, 8);
         run_tile("case3b", 8, 8, 8);
+
+        // ========== Case 4: OS dual-mode (gộp WS+OS) ==========
+        run_os_check("os.1tile", 1);
+        run_os_check("os.3tile", 3);
 
         // ========== Tổng kết ==========
         $display("");

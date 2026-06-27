@@ -42,6 +42,15 @@ int gemm_os(uint32_t a_addr, uint32_t w_addr, uint32_t c_addr,
             uint32_t K, uint32_t N, uint32_t act_mode);
 
 /*
+ * gemm_auto — Phase 2c GEMM tự hành. Pico stage tile-major + descriptor +
+ * AUTO_GO; accelerator tự duyệt m/k/n + tự lập trình DMA. Cùng signature
+ * gemm_tiled (drop-in cho Conv). act_mode = RAAS_CFG_ACT_*.
+ */
+int gemm_auto(uint32_t a_addr, uint32_t w_addr, uint32_t b_addr,
+              uint32_t c_addr,
+              uint32_t M, uint32_t K, uint32_t N, uint32_t act_mode);
+
+/*
  * gemm_sw — Pure software matrix multiply on PicoRV32.
  * Same signature as gemm_tiled, used for benchmarking.
  */

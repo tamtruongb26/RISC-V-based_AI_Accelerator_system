@@ -66,6 +66,20 @@ void accel_start_im2col(void)
     fence_iorw();
 }
 
+/* Phase 2c autonomy: ghi descriptor + AUTO_GO. accelerator tự duyệt tile,
+ * tự lập trình DMA. act_mode = RAAS_CFG_ACT_* (đã shift). KHÔNG set START
+ * (auto_seq tự drive start cho control_unit). */
+void accel_gemm_auto_start(uint32_t tiles, uint32_t in_base,
+                           uint32_t out_base, uint32_t act_mode)
+{
+    accel_write(RAAS_ACCEL_IM2COL_CFG0,   tiles);      /* {n,m,k} */
+    accel_write(RAAS_ACCEL_IM2COL_CFG1,   in_base);
+    accel_write(RAAS_ACCEL_DESC_OUT_BASE, out_base);
+    fence_iorw();
+    accel_write(RAAS_ACCEL_CFG, act_mode | RAAS_CFG_AUTO_GO);
+    fence_iorw();
+}
+
 /* Phase 2b: HW maxpool — cfg0 = (C<<16)|(W<<8)|H (tái dùng IM2COL_CFG0). */
 void accel_start_pool(uint32_t cfg0)
 {
@@ -85,12 +99,17 @@ int accel_wait_done(uint32_t timeout_cycles)
             return 0;
         }
     }
-    return -1;
+    return -3;  /* -3 = accel timeout (distinct from DMA: -1=timeout, -2=error) */
 }
 
 uint32_t accel_get_status(void)
 {
     return accel_read(RAAS_ACCEL_STATUS);
+}
+
+uint32_t accel_get_cfg(void)
+{
+    return accel_read(RAAS_ACCEL_CFG);
 }
 
 /* ── Counter readback ──────────────────────────────────────────────────── */
@@ -121,4 +140,17 @@ void accel_counters_snapshot(accel_counters_t *out)
     out->done      = accel_counter_read(RAAS_CNT_IDX_DONE);
     out->total     = accel_counter_read(RAAS_CNT_IDX_TOTAL);
     out->pe_active = accel_counter_read(RAAS_CNT_IDX_PE_ACTIVE);
+    out->sparsity_skip = accel_counter_read(RAAS_CNT_IDX_SPARSITY);
+    out->ecc_corrected = accel_counter_read(RAAS_CNT_IDX_ECC_CORRECTED);
+    out->ecc_uncorr    = accel_counter_read(RAAS_CNT_IDX_ECC_UNCORR);
+    out->tmr_mismatch  = accel_counter_read(RAAS_CNT_IDX_TMR_MISMATCH);
+}
+
+/* Phase 5: cấu hình fault injection (gói toàn bộ vào reg7 = DESC_OUT_BASE). */
+void accel_fault_config(uint32_t bit_pos, uint32_t trigger, uint32_t ecc_bypass,
+                        uint32_t target, uint32_t enable)
+{
+    accel_write(RAAS_ACCEL_DESC_OUT_BASE,
+                RAAS_FI_PACK(bit_pos, ecc_bypass, enable, target, trigger));
+    fence_iorw();
 }

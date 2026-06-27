@@ -49,6 +49,15 @@ static inline void wr16(uint32_t addr, int16_t val)
     mmio_write32(aligned, word);
 }
 
+static void ddr_memcpy(uint32_t dst_addr, uint32_t src_addr, uint32_t byte_count)
+{
+    uint32_t word_count = (byte_count + 3u) / 4u;
+    for (uint32_t i = 0; i < word_count; i++) {
+        uint32_t val = mmio_read32(src_addr + i * 4u);
+        mmio_write32(dst_addr + i * 4u, val);
+    }
+}
+
 /* ── Helper: HWC → CHW transpose ─────────────────────────────────────
  *
  * GEMM output is [H_out*W_out × C_out] (row = spatial, col = channel).
@@ -110,6 +119,9 @@ int lenet5_infer(int use_hw)
 
     int rc;
 
+#define DEBUG_COPY(hw_off, sw_off, addr, bytes) \
+    ddr_memcpy(LENET_ADDR(use_hw ? (hw_off) : (sw_off)), (addr), (bytes))
+
     /* Phase 0: bật instrumentation chỉ cho HW run.
      * SW run skipping → bảo toàn LAYER_CYC + ACCEL_CNT của HW run. */
     g_instr_enabled = use_hw;
@@ -145,9 +157,13 @@ int lenet5_infer(int use_hw)
     hwc_to_chw(fmap_a, fmap_b,
                LENET_CONV1_H_OUT, LENET_CONV1_W_OUT, LENET_CONV1_C_OUT);
 
+    DEBUG_COPY(LENET_DDR_HW_CONV1_OFF, LENET_DDR_SW_CONV1_OFF, fmap_b, LENET_CONV1_C_OUT * LENET_CONV1_H_OUT * LENET_CONV1_W_OUT * 2);
+
     lstamp(1);  /* Conv1 + transpose done */
     /* ── Layer 2: Pool1 ──────────────────────────────────────────────
      * maxpool2x2(FMAP_B [6×24×24]) → FMAP_A [6×12×12]
+     * Pool1 FM = 3456 > scratchpad 1024, NHƯNG pool_hw nay xử lý TỪNG KÊNH
+     * (24×24=576 ≤ 1024 mỗi kênh) → chạy HW được, không tràn.
      * ──────────────────────────────────────────────────────────────── */
     LDBG(2);
     if (use_hw)
@@ -156,6 +172,8 @@ int lenet5_infer(int use_hw)
     else
         maxpool2x2(fmap_b, fmap_a,
                    LENET_POOL1_C, LENET_POOL1_H_IN, LENET_POOL1_W_IN);
+
+    DEBUG_COPY(LENET_DDR_HW_POOL1_OFF, LENET_DDR_SW_POOL1_OFF, fmap_a, LENET_POOL1_C * LENET_POOL1_H_OUT * LENET_POOL1_W_OUT * 2);
 
     lstamp(2);  /* Pool1 done */
     /* ── Layer 3: Conv2 ──────────────────────────────────────────────
@@ -184,6 +202,8 @@ int lenet5_infer(int use_hw)
     hwc_to_chw(fmap_b, fmap_a,
                LENET_CONV2_H_OUT, LENET_CONV2_W_OUT, LENET_CONV2_C_OUT);
 
+    DEBUG_COPY(LENET_DDR_HW_CONV2_OFF, LENET_DDR_SW_CONV2_OFF, fmap_a, LENET_CONV2_C_OUT * LENET_CONV2_H_OUT * LENET_CONV2_W_OUT * 2);
+
     lstamp(3);  /* Conv2 + transpose done */
     /* ── Layer 4: Pool2 ──────────────────────────────────────────────
      * maxpool2x2(FMAP_A [16×8×8]) → FMAP_B [16×4×4] = 256 elements
@@ -196,6 +216,8 @@ int lenet5_infer(int use_hw)
     else
         maxpool2x2(fmap_a, fmap_b,
                    LENET_POOL2_C, LENET_POOL2_H_IN, LENET_POOL2_W_IN);
+
+    DEBUG_COPY(LENET_DDR_HW_POOL2_OFF, LENET_DDR_SW_POOL2_OFF, fmap_b, LENET_POOL2_C * LENET_POOL2_H_OUT * LENET_POOL2_W_OUT * 2);
 
     lstamp(4);  /* Pool2 done */
     /* ── Layer 5: FC1 ────────────────────────────────────────────────
@@ -212,6 +234,8 @@ int lenet5_infer(int use_hw)
                   1u, LENET_FC1_IN, LENET_FC1_OUT, RAAS_CFG_ACT_RELU);
     if (rc < 0) return rc;
 
+    DEBUG_COPY(LENET_DDR_HW_FC1_OFF, LENET_DDR_SW_FC1_OFF, fmap_a, LENET_FC1_OUT * 2);
+
     lstamp(5);  /* FC1 done */
     /* ── Layer 6: FC2 ────────────────────────────────────────────────
      * GEMM(1×120 × 120×84) + bias + ReLU
@@ -227,18 +251,26 @@ int lenet5_infer(int use_hw)
                   1u, LENET_FC2_IN, LENET_FC2_OUT, RAAS_CFG_ACT_RELU);
     if (rc < 0) return rc;
 
+    DEBUG_COPY(LENET_DDR_HW_FC2_OFF, LENET_DDR_SW_FC2_OFF, fmap_b, LENET_FC2_OUT * 2);
+
     lstamp(6);  /* FC2 done */
     /* ── Layer 7: FC3 ────────────────────────────────────────────────
      * GEMM(1×84 × 84×10) + bias + ReLU
      * FMAP_B [84] → FMAP_A [10]
      * ──────────────────────────────────────────────────────────────── */
     LDBG(7);
-    rc = fc_os(fmap_b,
-               LENET_ADDR(LENET_DDR_FC3_W_OFF),
-               LENET_ADDR(LENET_DDR_FC3_BIAS_OFF),
-               fmap_a,
-               LENET_FC3_IN, LENET_FC3_OUT, 1);
+    rc = use_hw
+        ? fc_os(fmap_b, LENET_ADDR(LENET_DDR_FC3_W_OFF),
+                LENET_ADDR(LENET_DDR_FC3_BIAS_OFF), fmap_a,
+                LENET_FC3_IN, LENET_FC3_OUT, 1)
+        : gemm_sw(fmap_b, LENET_ADDR(LENET_DDR_FC3_W_OFF),
+                  LENET_ADDR(LENET_DDR_FC3_BIAS_OFF), fmap_a,
+                  1u, LENET_FC3_IN, LENET_FC3_OUT, RAAS_CFG_ACT_RELU);
     if (rc < 0) return rc;
+
+    DEBUG_COPY(LENET_DDR_HW_FC3_OFF, LENET_DDR_SW_FC3_OFF, fmap_a, LENET_FC3_OUT * 2);
+
+#undef DEBUG_COPY
 
     lstamp(7);  /* FC3 done */
     /* ── Argmax ──────────────────────────────────────────────────────
@@ -272,7 +304,50 @@ int lenet5_infer(int use_hw)
         mmio_write32(base + 28u, cnt.done);
         mmio_write32(base + 32u, cnt.total);
         mmio_write32(base + 36u, cnt.pe_active);
+        mmio_write32(base + 40u, cnt.sparsity_skip);
     }
 
     return predicted;
+}
+
+/* ── Phase 5: demo 4-config reliability ────────────────────────────────────
+ * Chạy LeNet (HW) dưới 4 kịch bản, ghi predicted + counter vào DDR:
+ *   0 golden    : không tiêm lỗi → đáp án chuẩn.
+ *   1 no-harden : tiêm lỗi codeword bộ nhớ (u_sp_fm), ECC BYPASS → có thể SAI.
+ *   2 ECC       : CÙNG lỗi, ECC sửa → ĐÚNG + ecc_corrected.
+ *   3 TMR       : tiêm lỗi 1 bản FSM state, voter che → ĐÚNG + tmr_mismatch.
+ * (bit,trig) tune để lỗi rơi vào lúc accelerator đọc scratchpad / chuyển state. */
+void reliability_demo(uint32_t fault_bit, uint32_t fault_trig)
+{
+    uint32_t base = LENET_ADDR(LENET_DDR_REL_OFF);
+    accel_counters_t c;
+
+    /* 0. Golden — tắt FI */
+    accel_fault_config(0, 0, 0, 0, 0);
+    int pg = lenet5_infer(1);
+    mmio_write32(base + 0x00u, (uint32_t)pg);
+
+    /* 1. No-harden: lỗi bộ nhớ, ECC bypass */
+    accel_counters_clear();
+    accel_fault_config(fault_bit, fault_trig, /*bypass=*/1, RAAS_FI_TARGET_ECC, 1);
+    int p1 = lenet5_infer(1);
+    mmio_write32(base + 0x04u, (uint32_t)p1);
+
+    /* 2. ECC: cùng lỗi, ECC sửa */
+    accel_counters_clear();
+    accel_fault_config(fault_bit, fault_trig, /*bypass=*/0, RAAS_FI_TARGET_ECC, 1);
+    int p2 = lenet5_infer(1);
+    accel_counters_snapshot(&c);
+    mmio_write32(base + 0x08u, (uint32_t)p2);
+    mmio_write32(base + 0x0Cu, c.ecc_corrected);
+
+    /* 3. TMR: lỗi 1 bản FSM state (bit 0..4), voter che */
+    accel_counters_clear();
+    accel_fault_config(fault_bit & 0x4u, fault_trig, 0, RAAS_FI_TARGET_FSM, 1);
+    int p3 = lenet5_infer(1);
+    accel_counters_snapshot(&c);
+    mmio_write32(base + 0x10u, (uint32_t)p3);
+    mmio_write32(base + 0x14u, c.tmr_mismatch);
+
+    accel_fault_config(0, 0, 0, 0, 0);   /* tắt FI */
 }

@@ -95,10 +95,17 @@
 #define LENET_DDR_TILE_W_OFF      0x00038100u  /* 8×8 tile weight = 128B */
 #define LENET_DDR_TILE_B_OFF      0x00038200u  /* 8 bias = 16B */
 #define LENET_DDR_TILE_IN_OFF     0x00038300u  /* 8×8 tile input = 128B */
+#define LENET_DDR_OS_STAGE_OFF    0x00038400u  /* OS mode staging buffer (approx 4608B) */
+/* Phase 2c autonomy: staging tile-major liền mạch cho gemm_auto.
+ *   IN block/tile = [W64|bias8|A64] = 136 elem = 272B; Conv1 max 288 tile ≈ 78KB.
+ *   OUT: nt*mt tile × 128B. Đặt 0x50000 (rảnh, dưới HW_DEBUG 0x100000). */
+#define LENET_DDR_AUTO_IN_OFF     0x00050000u  /* ≤ ~80KB input block stage */
+#define LENET_DDR_AUTO_OUT_OFF    0x00070000u  /* ≤ ~16KB output tile stage */
 
 /* --- Communication --- */
 #define LENET_DDR_MAILBOX_OFF     0x00040000u  /* 4B status word */
 #define LENET_DDR_PREDICTED_OFF   0x00040004u  /* 4B argmax result */
+#define LENET_DDR_PREDICTED_SW_OFF 0x00040014u /* 4B software argmax result */
 #define LENET_DDR_LAYER_DBG_OFF   0x00040008u  /* 4B current layer (debug) */
 #define LENET_DDR_HW_CYCLES_OFF   0x0004000Cu  /* 4B hardware cycles */
 #define LENET_DDR_SW_CYCLES_OFF   0x00040010u  /* 4B software cycles */
@@ -120,6 +127,49 @@
 #define LENET_DDR_LAYER_CYC_OFF   0x00040020u  /* 9 × 4B = 36B */
 #define LENET_DDR_ACCEL_CNT_OFF   0x00040050u  /* 10 × 4B = 40B */
 #define LENET_DDR_INSTR_END_OFF   0x00040080u  /* end of instrumentation block */
+
+/* --- Error debug (firmware writes on failure, PS reads via DDR) ---
+ *   ERR_CODE     : raw return value from lenet5_infer() (-1, -2, -3)
+ *   ERR_DMA_MM2S : snapshot of MM2S DMASR at time of error
+ *   ERR_DMA_S2MM : snapshot of S2MM DMASR at time of error
+ *   ERR_ACCEL    : snapshot of accelerator STATUS at time of error
+ */
+#define LENET_DDR_ERR_CODE_OFF    0x00040080u  /* 4B signed error code */
+#define LENET_DDR_ERR_DMA_MM2S_OFF 0x00040084u /* 4B DMA MM2S DMASR */
+#define LENET_DDR_ERR_DMA_S2MM_OFF 0x00040088u /* 4B DMA S2MM DMASR */
+#define LENET_DDR_ERR_ACCEL_OFF   0x0004008Cu  /* 4B accel STATUS */
+#define LENET_DDR_ERR_TILE_N0_OFF 0x00040090u  /* 4B: n0 index when error */
+#define LENET_DDR_ERR_TILE_K0_OFF 0x00040094u  /* 4B: k0 index when error */
+#define LENET_DDR_ERR_CFG_OFF     0x00040098u  /* 4B: CFG value written to accel */
+
+/* --- Phase 5: reliability demo (4-config fault injection) — 6 × 4B --- */
+#define LENET_DDR_REL_OFF          0x000400A0u
+#define LENET_DDR_REL_GOLDEN_OFF   (LENET_DDR_REL_OFF + 0x00u) /* predicted không lỗi */
+#define LENET_DDR_REL_NOHARDEN_OFF (LENET_DDR_REL_OFF + 0x04u) /* lỗi mem, ECC bypass */
+#define LENET_DDR_REL_ECC_OFF      (LENET_DDR_REL_OFF + 0x08u) /* lỗi mem, ECC sửa */
+#define LENET_DDR_REL_ECC_CNT_OFF  (LENET_DDR_REL_OFF + 0x0Cu) /* ECC corrected count */
+#define LENET_DDR_REL_TMR_OFF      (LENET_DDR_REL_OFF + 0x10u) /* lỗi FSM, TMR vote */
+#define LENET_DDR_REL_TMR_CNT_OFF  (LENET_DDR_REL_OFF + 0x14u) /* TMR mismatch count */
+
+/* --- HW Debug Dump Offsets (Pico writes during HW run, PS reads to compare) --- */
+#define LENET_DDR_HW_DEBUG_BASE    0x00100000u
+#define LENET_DDR_HW_CONV1_OFF     (LENET_DDR_HW_DEBUG_BASE + 0x0000u)
+#define LENET_DDR_HW_POOL1_OFF     (LENET_DDR_HW_DEBUG_BASE + 0x4000u) /* 6*24*24*2 = 13824B -> fits in 0x4000 */
+#define LENET_DDR_HW_CONV2_OFF     (LENET_DDR_HW_DEBUG_BASE + 0x5000u) /* 6*12*12*2 = 3456B -> fits in 0x1000 */
+#define LENET_DDR_HW_POOL2_OFF     (LENET_DDR_HW_DEBUG_BASE + 0x6000u) /* 16*8*8*2 = 4096B -> fits in 0x1000 */
+#define LENET_DDR_HW_FC1_OFF       (LENET_DDR_HW_DEBUG_BASE + 0x6400u) /* 16*4*4*2 = 512B -> fits in 0x400 */
+#define LENET_DDR_HW_FC2_OFF       (LENET_DDR_HW_DEBUG_BASE + 0x6600u) /* 120*2 = 240B */
+#define LENET_DDR_HW_FC3_OFF       (LENET_DDR_HW_DEBUG_BASE + 0x6800u) /* 84*2 = 168B */
+
+/* --- SW Debug Dump Offsets (Pico writes during SW run, PS reads to compare) --- */
+#define LENET_DDR_SW_DEBUG_BASE    0x00110000u
+#define LENET_DDR_SW_CONV1_OFF     (LENET_DDR_SW_DEBUG_BASE + 0x0000u)
+#define LENET_DDR_SW_POOL1_OFF     (LENET_DDR_SW_DEBUG_BASE + 0x4000u)
+#define LENET_DDR_SW_CONV2_OFF     (LENET_DDR_SW_DEBUG_BASE + 0x5000u)
+#define LENET_DDR_SW_POOL2_OFF     (LENET_DDR_SW_DEBUG_BASE + 0x6000u)
+#define LENET_DDR_SW_FC1_OFF       (LENET_DDR_SW_DEBUG_BASE + 0x6400u)
+#define LENET_DDR_SW_FC2_OFF       (LENET_DDR_SW_DEBUG_BASE + 0x6600u)
+#define LENET_DDR_SW_FC3_OFF       (LENET_DDR_SW_DEBUG_BASE + 0x6800u)
 
 /* Convenience: absolute Pico-view addresses */
 #define LENET_ADDR(off)  (RAAS_PICO_DDR_BASE + (off))
